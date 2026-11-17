@@ -19,6 +19,8 @@ Addons for WoW Forever (interface 16001). Each folder is one addon.
 
 Most of them move and set up in Edit Mode (Esc > Edit Mode).
 
+These addons were made with the help of Claude, Anthropic's AI assistant.
+
 ## Installing (for friends)
 
 1. Download **SpliffAddons-Updater.zip** from the [latest release](../../releases/latest) and unzip it anywhere (say, your Desktop).

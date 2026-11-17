@@ -7,6 +7,25 @@ uploads the addons that changed to their CurseForge pages automatically.
 MacroBook is not published: it writes Spliff's own warrior macros into
 whoever installs it (replacing any macros with the same names).
 
+## Projects
+
+| Addon | CurseForge name | Project ID |
+|---|---|---|
+| Spliffbars | Spliffbars | 1812981 |
+| DamageBar | DamageBar | 1812983 |
+| HuntTarget | HuntTarget | 1812987 |
+| DungeonQuests | Spliff's Dungeon Quests | 1812996 |
+| SpliffPlates | SpliffPlates | 1812999 |
+| CursorCues | CursorCues | 1813001 |
+| WeaponIndicator | WeaponIndicator | 1813002 |
+| BagWheel | BagWheel | 1813004 |
+| BagButton | Spliff's Bag Button | 1813007 |
+| MinimapMenu | MinimapMenu | 1813013 |
+| EmoteWheel | Spliff's Emote Wheel | 1813019 |
+
+(Three names were already taken on CurseForge, so they carry "Spliff's".)
+Logos are in `media/logos/`. Licence: MIT; distribution to other apps allowed.
+
 ## One-time setup
 
 1. **Account**: sign up at https://www.curseforge.com (top right).
@@ -51,6 +70,8 @@ Bars for the long haul, each one movable and set up in Edit Mode (Esc > Edit Mod
 
 `/spliffbars` lists the commands, including tests for each effect.
 
+_Made with the help of Claude, Anthropic's AI assistant._
+
 ### DamageBar
 **Summary:** One bar showing your damage split by ability, with your best fights as records.
 
@@ -60,6 +81,8 @@ Bars for the long haul, each one movable and set up in Edit Mode (Esc > Edit Mod
 A single bar split into coloured pieces, one per ability, sized by its share of your damage. It adds up across fights and resets how you choose: after time out of combat, each fight, on zone change, each login, or never (right-click to clear). Hover for the full list. A gold box at the end holds your best of the day, with all-time records in the tooltip.
 
 Reads the game's own damage meter. Move and size it in Edit Mode.
+
+_Made with the help of Claude, Anthropic's AI assistant._
 
 ### HuntTarget
 **Summary:** Type a mob name, press one key to target it, skull it and charge. Plus Tab Mark: mark a whole pack in one key.
@@ -72,6 +95,8 @@ Reads the game's own damage meter. Move and size it in Edit Mode.
 - **Follow**: Alt+click an ally to set up following them.
 
 Set the keys in Options > Keybindings > AddOns. Works in combat.
+
+_Made with the help of Claude, Anthropic's AI assistant._
 
 ### DungeonQuests
 **Summary:** A checklist of every dungeon's quests: which you have, who gives them, where (map pin) and what to do first.
@@ -87,6 +112,8 @@ Set the keys in Options > Keybindings > AddOns. Works in combat.
 
 Filtered to your race and class. Requires Questie (it reads Questie's quest database).
 
+_Made with the help of Claude, Anthropic's AI assistant._
+
 ### SpliffPlates
 **Summary:** Quest progress like "3/8" on the nameplates of mobs your quests need.
 
@@ -94,6 +121,8 @@ Filtered to your race and class. Requires Questie (it reads Questie's quest data
 
 **Description:**
 A small gold "3/8" under the health bar of every mob that counts toward one of your quests, and a green tick once that objective is done. Only objectives in your own quest log count. Turn on "Always Show Nameplates" to see it out of combat. Works alongside Questie's nameplate icon. `/plates` turns it on and off.
+
+_Made with the help of Claude, Anthropic's AI assistant._
 
 ### CursorCues
 **Summary:** Icons at your mouse for missing buffs, ready abilities, tracking, and targets in range.
@@ -111,6 +140,8 @@ Little icons that follow your cursor, each a "cue" you set up in `/cues`:
 
 Each cue has its own timing (in combat, out, always), look (steady, pulse, flash), size and spot.
 
+_Made with the help of Claude, Anthropic's AI assistant._
+
 ### WeaponIndicator
 **Summary:** Shows what you're holding ("Axe and Shield"); click it to apply a sharpening stone or start fishing.
 
@@ -118,6 +149,8 @@ Each cue has its own timing (in combat, out, always), look (steady, pulse, flash
 
 **Description:**
 A small badge with your weapon icons and a label like "Two-Hand Axe", "Axe and Shield" or "Dual Daggers", coloured by what you're holding. Use a sharpening stone, weightstone or oil and the icons glow: click one to put it on that weapon. With a fishing pole in hand, a click casts Fishing. Hover for the weapon's tooltip. Size, spacing, text position, font and colour are all in Edit Mode.
+
+_Made with the help of Claude, Anthropic's AI assistant._
 
 ### BagWheel
 **Summary:** Your Baganator categories in a ring at your cursor; hover for the items, click to use. Works in combat.
@@ -129,6 +162,8 @@ Press your key and a ring of your Baganator custom categories opens at the curso
 
 Uses your Baganator settings (optional dependency).
 
+_Made with the help of Claude, Anthropic's AI assistant._
+
 ### BagButton
 **Summary:** One bag icon showing your free bag slots; click to open your bags.
 
@@ -136,6 +171,8 @@ Uses your Baganator settings (optional dependency).
 
 **Description:**
 A single movable bag button that shows how many bag slots you have free and opens your bags (whatever bag addon you use). It can hide the game's row of bag buttons. Move and size it in Edit Mode.
+
+_Made with the help of Claude, Anthropic's AI assistant._
 
 ### MinimapMenu
 **Summary:** A gear button on the minimap with the game menu in a drop-down. Can hide the menu bar.
@@ -145,6 +182,8 @@ A single movable bag button that shows how many bag slots you have free and open
 **Description:**
 A gear button on the minimap that opens the game's menu (character, spellbook, talents, professions and the rest) as a tidy drop-down, so you can hide the menu bar at the bottom of the screen. Works in combat.
 
+_Made with the help of Claude, Anthropic's AI assistant._
+
 ### EmoteWheel
 **Summary:** Hold F for a wheel of emotes; point at one and let go.
 
@@ -152,3 +191,5 @@ A gear button on the minimap that opens the game's menu (character, spellbook, t
 
 **Description:**
 Hold the key (F by default) and a wheel of emotes opens at your cursor: dance, laugh, cheer, cry, kneel, point and more. Point at one and let go to do it. Change the key in Options > Keybindings > AddOns.
+
+_Made with the help of Claude, Anthropic's AI assistant._

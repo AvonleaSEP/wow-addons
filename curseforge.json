@@ -1,13 +1,13 @@
 {
-  "BagButton": null,
-  "BagWheel": null,
-  "CursorCues": null,
-  "DamageBar": null,
-  "DungeonQuests": null,
-  "EmoteWheel": null,
-  "HuntTarget": null,
-  "MinimapMenu": null,
-  "SpliffPlates": null,
-  "Spliffbars": null,
-  "WeaponIndicator": null
+  "BagButton": 1813007,
+  "BagWheel": 1813004,
+  "CursorCues": 1813001,
+  "DamageBar": 1812983,
+  "DungeonQuests": 1812996,
+  "EmoteWheel": 1813019,
+  "HuntTarget": 1812987,
+  "MinimapMenu": 1813013,
+  "SpliffPlates": 1812999,
+  "Spliffbars": 1812981,
+  "WeaponIndicator": 1813002
 }
