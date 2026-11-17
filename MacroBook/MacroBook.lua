@@ -42,26 +42,27 @@ local MACROS = {
 /cast [mod:shift,nostance:3] Berserker Stance; [nomod:shift] Thunder Clap]],
     },
     {
-        -- Heroic Strike on your next swing ("!": pressing again never
-        -- un-queues it by accident). Alt: cancel a queued Heroic Strike
-        -- (keeps your rage). /stopcasting alone didn't do it on Forever, so
-        -- Alt also casts it again (a modern client turns a queued spell
-        -- off that way), then clears the spell queue (/cqs, through the
-        -- MBClearQ button below, as /cqs ignores [mod:alt]).
-        -- That order works whichever of the two Forever honours.
-        -- No Alt: Victory Rush too whenever it's up (it's on the global
-        -- cooldown, Heroic Strike isn't, so one press does both); the last
-        -- line clears the red "not ready" text when it isn't.
+        -- Each press:
+        --   Victory Rush whenever it's up (it's on the global cooldown,
+        --     Heroic Strike isn't, so one press does both);
+        --   Throw, if you have a thrown weapon on: macros can't check
+        --     range, but the game itself refuses Throw when the target is
+        --     too close (melee) or too far, so it only throws when they're
+        --     in throwing range;
+        --   Heroic Strike on your next swing ("!": pressing again never
+        --     un-queues it by accident).
+        -- The last line clears the red "not ready" / "too close" text.
+        -- (There's no Alt-to-cancel: nothing a macro can do un-queues
+        -- Heroic Strike on Forever; /stopcasting, casting it again and
+        -- /cqs were all tried.)
         name = "Heroic",
         icon = 132282,
         body = [[
 #showtooltip Heroic Strike
-/stopcasting [mod:alt]
-/cast [mod:alt] Heroic Strike
-/click [mod:alt] MBClearQ
-/startattack [nomod:alt]
-/cast [nomod:alt] Victory Rush
-/cast [nomod:alt] !Heroic Strike
+/startattack
+/cast Victory Rush
+/cast [equipped:Thrown] Throw
+/cast !Heroic Strike
 /run UIErrorsFrame:Clear()]],
     },
     {
@@ -122,19 +123,6 @@ local MACROS = {
 /cast [nostance:2] Defensive Stance; Shield Wall]],
     },
 }
-
----------------------------------------------------------------------------
--- A hidden button that clears the queued spell (/cqs), so a macro can do
--- it only under a condition: /click [mod:alt] MBClearQ. It acts on the
--- click's "up" whatever your key-down setting (useOnKeyDown off), like
--- the Bag Wheel's buttons.
----------------------------------------------------------------------------
-local clearQueue = CreateFrame("Button", "MBClearQ", UIParent, "SecureActionButtonTemplate")
-clearQueue:SetAttribute("type", "macro")
-clearQueue:SetAttribute("macrotext", "/cqs")
-clearQueue:SetAttribute("useOnKeyDown", false)
-clearQueue:RegisterForClicks("AnyUp")
-clearQueue:Hide()
 
 ---------------------------------------------------------------------------
 -- {ButtonName}: the item on that action button
