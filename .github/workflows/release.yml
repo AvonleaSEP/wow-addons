@@ -22,11 +22,13 @@ jobs:
           addons=$(for d in */; do d=${d%/}; if [ -f "$d/$d.toc" ]; then echo "$d"; fi; done)
           echo "Addons: $addons"
           zip -r -q dist/SpliffAddons.zip $addons
+          # WowUp picks a Forever install's zip by its name ending in -forever
+          cp dist/SpliffAddons.zip dist/SpliffAddons-forever.zip
           (cd updater && zip -q ../dist/SpliffAddons-Updater.zip Update-SpliffAddons.bat Update-SpliffAddons.ps1)
 
       - name: Publish the release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release create "$GITHUB_REF_NAME" dist/SpliffAddons.zip dist/SpliffAddons-Updater.zip \
-            --title "$GITHUB_REF_NAME" --generate-notes
+          gh release create "$GITHUB_REF_NAME" dist/SpliffAddons.zip dist/SpliffAddons-forever.zip \
+            dist/SpliffAddons-Updater.zip --title "$GITHUB_REF_NAME" --generate-notes
