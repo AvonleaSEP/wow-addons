@@ -1,0 +1,7 @@
+## Interface: 16001
+## Title: MacroBook
+## Notes: Keeps the macros listed in MacroBook.lua in your account macros.
+## Author: Devon
+## Version: 1.0
+
+MacroBook.lua

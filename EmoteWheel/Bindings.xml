@@ -1,0 +1,5 @@
+<Bindings>
+    <Binding name="EMOTEWHEEL_OPEN" header="EMOTEWHEEL" runOnUp="true">
+        EmoteWheel_OnKey(keystate)
+    </Binding>
+</Bindings>

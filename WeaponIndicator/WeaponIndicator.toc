@@ -1,0 +1,11 @@
+## Interface: 16001
+## Title: Weapon Indicator
+## Notes: Shows whether you have a shield, a two-hander or two weapons equipped. Move and size it in Edit Mode.
+## Author: Devon
+## Version: 1.1
+## SavedVariables: WeaponIndicatorDB
+
+Libs\LibStub\LibStub.lua
+Libs\LibEditMode\embed.xml
+
+WeaponIndicator.lua

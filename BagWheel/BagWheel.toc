@@ -1,0 +1,9 @@
+## Interface: 16001
+## Title: Bag Wheel
+## Notes: A two-ring wheel at your cursor: your Baganator custom categories, then the items from each that are in your bags. Click one to use it. Works in combat.
+## Author: Devon
+## Version: 1.2
+## SavedVariables: BagWheelDB
+## OptionalDeps: Baganator
+
+BagWheel.lua

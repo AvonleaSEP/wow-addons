@@ -1,0 +1,16 @@
+## Interface: 16001
+## Title: Spliffbars
+## Notes: Bars for the long haul: vertical XP and reputation with a timeline, a gold goal bar, and weapon and trade skill bars. Each piece moves and sets up in Edit Mode.
+## Author: Devon
+## Version: 3.0
+## SavedVariables: XPRepBarsDB, SpliffbarsGoldDB, SpliffbarsSkillsDB
+
+Libs\LibStub\LibStub.lua
+Libs\LibEditMode\embed.xml
+
+Core.lua
+XP.lua
+Gold.lua
+Mote.lua
+Loot.lua
+Skills.lua

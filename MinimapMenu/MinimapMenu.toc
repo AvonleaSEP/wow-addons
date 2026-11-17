@@ -1,0 +1,8 @@
+## Interface: 16001
+## Title: Minimap Menu
+## Notes: A gear button on the minimap with the game's menu (character, spellbook, talents, professions and the rest) in a drop-down. Can hide the menu bar at the bottom. Works in combat.
+## Author: Devon
+## Version: 1.0
+## SavedVariables: MinimapMenuDB
+
+MinimapMenu.lua

@@ -1,0 +1,11 @@
+## Interface: 16001
+## Title: Bag Button
+## Notes: One bag icon showing your free bag slots; click it to open your bags. Can hide the game's bag buttons. Move and size it in Edit Mode.
+## Author: Devon
+## Version: 1.0
+## SavedVariables: BagButtonDB
+
+Libs\LibStub\LibStub.lua
+Libs\LibEditMode\embed.xml
+
+BagButton.lua

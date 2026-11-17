@@ -1,0 +1,7 @@
+<Bindings>
+    <Binding name="CLICK HuntTargetButton:LeftButton" header="HUNTTARGET"/>
+    <Binding name="HUNTTARGET_SET" header="HUNTTARGET">
+        HuntTarget_FromTarget()
+    </Binding>
+    <Binding name="CLICK HuntTargetNext:LeftButton" header="TABMARK"/>
+</Bindings>

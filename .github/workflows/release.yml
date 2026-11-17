@@ -1,0 +1,32 @@
+# Publishing a version: push a tag like v1.0.0 (git tag v1.0.0; git push --tags).
+# This zips every addon folder into SpliffAddons.zip, bundles the updater
+# into SpliffAddons-Updater.zip, and attaches both to a GitHub release.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Zip the addons and the updater
+        run: |
+          mkdir dist
+          addons=$(for d in */; do d=${d%/}; [ -f "$d/$d.toc" ] && echo "$d"; done)
+          echo "Addons: $addons"
+          zip -r -q dist/SpliffAddons.zip $addons
+          (cd updater && zip -q ../dist/SpliffAddons-Updater.zip Update-SpliffAddons.bat Update-SpliffAddons.ps1)
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/SpliffAddons.zip dist/SpliffAddons-Updater.zip \
+            --title "$GITHUB_REF_NAME" --generate-notes

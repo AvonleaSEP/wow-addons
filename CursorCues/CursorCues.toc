@@ -1,0 +1,8 @@
+## Interface: 16001
+## Title: Cursor Cues
+## Notes: Icons at your mouse for missing buffs, ready abilities and tracking. Set up your own cues with /cues.
+## Author: Devon
+## Version: 2.0
+## SavedVariables: CursorCuesDB
+
+CursorCues.lua

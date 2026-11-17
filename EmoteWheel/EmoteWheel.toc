@@ -1,0 +1,7 @@
+## Interface: 16001
+## Title: Emote Wheel
+## Notes: Hold F for a wheel of emotes (dance, laugh, cheer, cry, kneel and more). Point at one and let go.
+## Author: Devon
+## Version: 1.0
+
+EmoteWheel.lua

@@ -1,0 +1,1 @@
+LibEditMode commit adfa353, minor 19, from github.com/p3lim-wow/LibEditMode

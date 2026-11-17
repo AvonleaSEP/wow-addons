@@ -1,0 +1,11 @@
+## Interface: 16001
+## Title: Hunt Target
+## Notes: Type mob names in the box; your Hunt key then targets the nearest one, marks it with a skull and uses your chosen ability (Charge, Shoot, or your own). Move it in Edit Mode.
+## Author: Devon
+## Version: 2.0
+## SavedVariables: HuntTargetDB
+
+Libs\LibStub\LibStub.lua
+Libs\LibEditMode\embed.xml
+
+HuntTarget.lua

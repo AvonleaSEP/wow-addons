@@ -1,0 +1,5 @@
+# the updater remembers where WoW is on each computer
+updater/addons-path.txt
+dist/
+.DS_Store
+Thumbs.db
