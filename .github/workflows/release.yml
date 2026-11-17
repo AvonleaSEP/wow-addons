@@ -19,7 +19,7 @@ jobs:
       - name: Zip the addons and the updater
         run: |
           mkdir dist
-          addons=$(for d in */; do d=${d%/}; [ -f "$d/$d.toc" ] && echo "$d"; done)
+          addons=$(for d in */; do d=${d%/}; if [ -f "$d/$d.toc" ]; then echo "$d"; fi; done)
           echo "Addons: $addons"
           zip -r -q dist/SpliffAddons.zip $addons
           (cd updater && zip -q ../dist/SpliffAddons-Updater.zip Update-SpliffAddons.bat Update-SpliffAddons.ps1)
