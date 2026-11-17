@@ -1,6 +1,9 @@
 # Publishing a version: push a tag like v1.0.0 (git tag v1.0.0; git push --tags).
 # This zips every addon folder into SpliffAddons.zip, bundles the updater
 # into SpliffAddons-Updater.zip, and attaches both to a GitHub release.
+# Then, if the CF_API_KEY secret is set, it uploads each addon that has a
+# CurseForge project ID in curseforge.json (see CURSEFORGE.md): the ones
+# that changed since the last version, plus any whose ID was just added.
 name: Release
 
 on:
@@ -10,11 +13,16 @@ on:
 permissions:
   contents: write
 
+env:
+  CF_API_KEY: ${{ secrets.CF_API_KEY }}
+
 jobs:
   release:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # the earlier tags, to see what changed
 
       - name: Zip the addons and the updater
         run: |
@@ -25,6 +33,9 @@ jobs:
           # WowUp picks a Forever install's zip by its name ending in -forever
           cp dist/SpliffAddons.zip dist/SpliffAddons-forever.zip
           (cd updater && zip -q ../dist/SpliffAddons-Updater.zip Update-SpliffAddons.bat Update-SpliffAddons.ps1)
+          # one zip per addon, for CurseForge
+          mkdir dist/single
+          for a in $addons; do zip -r -q "dist/single/$a.zip" "$a"; done
 
       - name: Publish the release
         env:
@@ -32,3 +43,38 @@ jobs:
         run: |
           gh release create "$GITHUB_REF_NAME" dist/SpliffAddons.zip dist/SpliffAddons-forever.zip \
             dist/SpliffAddons-Updater.zip --title "$GITHUB_REF_NAME" --generate-notes
+
+      - name: Upload to CurseForge
+        if: env.CF_API_KEY != ''
+        run: |
+          set -euo pipefail
+          api="https://wow.curseforge.com/api"
+          # WoW Forever's game version on CurseForge (1.60.1)
+          versions=$(curl -sf -H "X-Api-Token: $CF_API_KEY" "$api/game/versions")
+          gv=$(echo "$versions" | jq -c '[.[] | select(.name == "1.60.1") | .id]')
+          if [ "$gv" = "[]" ]; then
+            echo "No WoW Forever (1.60.1) game version found. Versions that look close:"
+            echo "$versions" | jq -c '.[] | select(.name | test("1\\.60|orever")) | {id, name, gameVersionTypeID}'
+            exit 1
+          fi
+          echo "Game version ids: $gv"
+
+          prev=$(git describe --tags --abbrev=0 "${GITHUB_REF_NAME}^" 2>/dev/null || true)
+          echo "Previous version: ${prev:-none}"
+          changelog="See https://github.com/${GITHUB_REPOSITORY}/releases/tag/${GITHUB_REF_NAME}"
+
+          for addon in $(jq -r 'to_entries[] | select(.value != null) | .key' curseforge.json); do
+            id=$(jq -r --arg a "$addon" '.[$a]' curseforge.json)
+            if [ ! -f "dist/single/$addon.zip" ]; then echo "$addon: no such addon, skipped"; continue; fi
+            # skip it if nothing changed and its ID was already there last time
+            if [ -n "$prev" ] && git diff --quiet "$prev" HEAD -- "$addon"; then
+              oldId=$(git show "$prev:curseforge.json" 2>/dev/null | jq -r --arg a "$addon" '.[$a] // empty' || true)
+              if [ "$oldId" = "$id" ]; then echo "$addon: unchanged, skipped"; continue; fi
+            fi
+            meta=$(jq -nc --arg cl "$changelog" --arg dn "$addon ${GITHUB_REF_NAME}" --argjson gv "$gv" \
+              '{changelog: $cl, changelogType: "markdown", displayName: $dn, gameVersions: $gv, releaseType: "release"}')
+            echo "$addon: uploading to project $id"
+            curl -sf -H "X-Api-Token: $CF_API_KEY" --form-string "metadata=$meta" \
+              -F "file=@dist/single/$addon.zip" "$api/projects/$id/upload-file"
+            echo
+          done
