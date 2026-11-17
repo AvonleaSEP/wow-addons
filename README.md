@@ -14,6 +14,8 @@ Addons for WoW Forever (interface 16001). Each folder is one addon.
 | **BagWheel** | Your Baganator categories in a ring at the cursor, with cooldowns; click to use |
 | **BagButton** | One bag icon showing your free slots; click to open your bags |
 | **MinimapMenu** | A gear button on the minimap with the game's menu in a drop-down |
+| **SpliffPlates** | Quest progress ("3/8") on the nameplates of mobs your quests need (`/plates`) |
+| **DungeonQuests** | A checklist of every dungeon's quests: which you have, who gives them and where (map pin), and what comes first (`/dq`; needs Questie) |
 
 Most of them move and set up in Edit Mode (Esc > Edit Mode).
 

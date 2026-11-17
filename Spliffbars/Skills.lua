@@ -86,13 +86,18 @@ local DEFAULTS = {
     --   smart   zooms in as you close in on the cap (see SmartWindow)
     --   levels  your last "zoom" levels of skill (5 points a level)
     --   whole   0 to the cap
-    weapon = { dir = "RIGHT", flip = false, icon = 14, length = 30, gap = 2, icons = true, show = "hands", thick = 0, mote = true,
-        scale = "smart", zoom = 5 },
-    trade = { dir = "RIGHT", flip = false, icon = 14, length = 30, gap = 2, icons = true, show = "all", thick = 0, art = true, mote = true },
+    -- weapon: as Devon has them (flat bars without icons, the last 10
+    -- levels, low in the middle of the screen)
+    weapon = { dir = "DOWN", flip = false, icon = 19, length = 125, gap = 2, icons = false, show = "hands", thick = 0,
+        mote = true, scale = "levels", zoom = 10 },
+    -- trade: as Devon has them (tall standing bars with the game's art, in
+    -- the bottom-right corner)
+    trade = { dir = "RIGHT", flip = false, icon = 24, length = 160, gap = 12, icons = true, show = "all",
+        thick = 20, art = true, mote = true },
 }
 local DEFAULT_POS = {
-    weapon = { point = "BOTTOM", x = -360, y = 6 },
-    trade = { point = "BOTTOM", x = 360, y = 6 },
+    weapon = { point = "BOTTOM", x = 1, y = 203 },
+    trade = { point = "BOTTOMRIGHT", x = -255, y = 0 },
 }
 
 local DB, layoutName

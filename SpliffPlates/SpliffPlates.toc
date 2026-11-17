@@ -1,0 +1,8 @@
+## Interface: 16001
+## Title: Spliff Plates
+## Notes: Quest progress on nameplates: "3/8" beside every mob your quests need, and a tick once that objective is done. Sits opposite Questie's quest icon.
+## Author: Devon
+## Version: 1.0
+## OptionalDeps: Questie
+
+SpliffPlates.lua

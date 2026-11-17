@@ -1,0 +1,9 @@
+## Interface: 16001
+## Title: Dungeon Quests
+## Notes: A checklist of every dungeon's quests: which you have, which you can pick up, who gives them and where (with a map pin), and what you need to do first. /dq to open. Uses Questie's quest database.
+## Author: Devon
+## Version: 1.0
+## Dependencies: Questie
+## SavedVariables: DungeonQuestsDB
+
+DungeonQuests.lua

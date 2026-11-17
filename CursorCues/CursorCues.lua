@@ -6,6 +6,7 @@
 --   My buff missing on group  e.g. Oath of Light: yours isn't on anyone
 --   Ability ready             e.g. Overpower / Revenge, or any cooldown
 --   Tracking off              e.g. Find Minerals / Find Herbs
+--   Target in range           e.g. Throw: your target is in throwing range
 --
 -- Each cue has its own spells, when it shows (in combat, out of combat,
 -- always), look (steady, pulse, flash), size, brightness and spot. Cues
@@ -30,7 +31,16 @@ local FALLBACK_ICONS = {
     ["Find Minerals"] = "Interface\\Icons\\Spell_Nature_Earthquake",
     ["Find Herbs"]    = "Interface\\Icons\\INV_Misc_Flower_02",
     ["Oath of Light"] = "Interface\\Icons\\Spell_Holy_HolyBolt",
+    ["Throw"]         = "Interface\\Icons\\Ability_Throw",
 }
+
+-- The throwing knife at your cursor while your target is in throwing range
+-- (added once to existing lists too; see OnLoaded)
+-- It sits on the pointer itself (over the arrow, which points up-left from
+-- its tip): the "On the pointer" spot.
+local POINTER_X, POINTER_Y = 12, -12
+local THROW_CUE = { name = "Throw range", type = "range", spells = "Throw",
+    when = "always", style = "steady", x = POINTER_X, y = POINTER_Y, size = 32, alpha = 1 }
 
 -- The starting list (your cues from before the settings window).
 local DEFAULT_CUES = {
@@ -48,6 +58,7 @@ local DEFAULT_CUES = {
       buffs = "Well Fed, Mana Regeneration, Increased Agility, Increased Intellect",
       icon = "Interface\\Icons\\Spell_Misc_Food", requireKnown = false,
       when = "combat", style = "flash", every = 10, x = 0, y = -46, size = 26, alpha = 0.6 },
+    THROW_CUE,
 }
 
 local NEW_CUE = { name = "New cue", type = "buff", spells = "", when = "combat", style = "steady",
@@ -125,6 +136,23 @@ local function SpellNameFromID(spellID)
     end
     if not ok or isSecret(n) then return nil end
     return n
+end
+
+-- Is your target in range of a spell? true / false, or nil when the game
+-- won't say (no target, or it's hiding the answer). Tries the spell by
+-- name, then the older range check.
+local function InRange(name)
+    if not UnitExists("target") then return nil end
+    local ok, r
+    if C_Spell and C_Spell.IsSpellInRange then
+        ok, r = pcall(C_Spell.IsSpellInRange, name, "target")
+    elseif IsSpellInRange then
+        ok, r = pcall(IsSpellInRange, name, "target")
+    end
+    if not ok or isSecret(r) then return nil end
+    if r == true or r == 1 then return true end
+    if r == false or r == 0 then return false end
+    return nil
 end
 
 local function HasEnemyTarget()
@@ -369,6 +397,14 @@ local function Evaluate(cue, snap)
             end
         end
         return false
+    elseif t == "range" then
+        -- a living enemy targeted and in reach of the spell (Throw: too close
+        -- in melee, too far past 30 yards, both say no)
+        if onTaxi or not WhenOK(cue) or not HasEnemyTarget() then return false end
+        for _, name in ipairs(Spells(cue)) do
+            if PlayerKnows(name) and InRange(name) == true then return true, name end
+        end
+        return false
     elseif t == "tracking" then
         if not WhenOK(cue) then return false end
         local missing
@@ -552,6 +588,28 @@ driver:SetScript("OnEvent", function(_, event, ...)
         end
         DB.durations = DB.durations or {}
         DB.debug = nil -- 1.x troubleshooting log, no longer kept
+        -- once: add the throw-range cue to an existing list
+        if not DB.throwCueAdded then
+            DB.throwCueAdded = true
+            local have = false
+            for _, cue in ipairs(DB.cues) do
+                if cue.type == "range" then have = true end
+            end
+            if not have then
+                local cue = CopyTable(THROW_CUE)
+                cue.enabled = true
+                table.insert(DB.cues, cue)
+            end
+        end
+        -- once: the throw cue moves from beside the pointer onto it
+        if not DB.throwCueOnPointer then
+            DB.throwCueOnPointer = true
+            for _, cue in ipairs(DB.cues) do
+                if cue.type == "range" and cue.x == 40 and cue.y == 0 then
+                    cue.x, cue.y, cue.size = POINTER_X, POINTER_Y, 32
+                end
+            end
+        end
         if DB.preview == nil then DB.preview = true end
         driver:UnregisterEvent("ADDON_LOADED")
         if OnLoaded then OnLoaded() end
@@ -597,18 +655,21 @@ local TYPES = {
     { "groupbuff", "My buff missing on group" },
     { "ready", "Ability ready" },
     { "tracking", "Tracking off" },
+    { "range", "Target in range" },
 }
 local WHENS = { { "combat", "In combat" }, { "nocombat", "Out of combat" }, { "always", "Always" } }
 local STYLES = { { "steady", "Steady" }, { "pulse", "Pulse" }, { "flash", "Flash every few sec" } }
 local SPOTS = {
     { "Above", 0, 32 }, { "Below", 0, -40 }, { "Left", -40, 0 }, { "Right", 40, 0 },
     { "Top-left", -32, 32 }, { "Top-right", 32, 32 }, { "Bottom-left", -32, -32 }, { "Bottom-right", 32, -32 },
+    { "On the pointer", POINTER_X, POINTER_Y },
 }
 local SPELL_LABELS = {
     buff = "Spell you cast for it (sets its icon and timer; blank if none)",
     groupbuff = "Your buff spell",
     ready = "Abilities (commas between; the first one ready shows)",
     tracking = "Tracking spells (commas between)",
+    range = "Spells to check range with (commas between; the first in range shows)",
 }
 
 local win, selected
@@ -844,7 +905,7 @@ local function BuildWindow()
         if not selected then return end
         if not lastCast then print(PREFIX .. "cast the spell once, then click this.") return end
         local l = Spells(selected)
-        if selected.type == "ready" or selected.type == "tracking" then
+        if selected.type == "ready" or selected.type == "tracking" or selected.type == "range" then
             local copy = {}
             for _, s in ipairs(l) do copy[#copy + 1] = s end
             copy[#copy + 1] = lastCast

@@ -14,11 +14,12 @@
 local _, ns = ...
 local LEM, isSecret, Num = ns.LEM, ns.isSecret, ns.Num
 
+-- as Devon has it: a long, slim bar along the bottom-left corner
 local DEFAULTS = {
-    width = 240, height = 16, expand = true, expandHeight = 48, text = "goal",
-    font = "Game default", fontSize = 11, shine = true, bigPct = 2,
+    width = 475, height = 17, expand = false, expandHeight = 48, text = "goal",
+    font = "Game default", fontSize = 11, shine = true, bigPct = 8,
 }
-local DEFAULT_POS = { point = "BOTTOM", x = 0, y = 150 }
+local DEFAULT_POS = { point = "BOTTOMLEFT", x = 24, y = 20 }
 local DEFAULT_GOAL = 100 * 10000 -- 100 gold, in copper
 local BIG_FLOOR = 1000            -- never smaller than 10 silver
 
@@ -575,6 +576,20 @@ LEM:RegisterCallback("layout", function(layout)
 end)
 
 ns.SetGoldGoal = function(text) if DB then SetGoal(text) end end
+
+-- looted coins landing in the bar (Loot.lua): the shine sweeps across
+-- right away and the coin icon pops
+local coinPop = coin:CreateAnimationGroup()
+local pop1 = coinPop:CreateAnimation("Scale")
+pop1:SetScale(1.5, 1.5); pop1:SetDuration(0.12); pop1:SetOrder(1); pop1:SetSmoothing("OUT")
+local pop2 = coinPop:CreateAnimation("Scale")
+pop2:SetScale(1 / 1.5, 1 / 1.5); pop2:SetDuration(0.25); pop2:SetOrder(2); pop2:SetSmoothing("IN")
+ns.GoldShine = function()
+    sweep:Stop()
+    sweep:Play()
+    coinPop:Stop()
+    coinPop:Play()
+end
 
 ---------------------------------------------------------------------------
 -- Events

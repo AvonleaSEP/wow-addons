@@ -7,6 +7,9 @@
 -- How it knows it's gathering: you cast Mining, Herb Gathering or Skinning
 -- just before the loot opened, or the game calls it fishing loot (a catch
 -- flies from the bobber you clicked).
+-- From mobs and chests: coins fly into the Gold bar (which shines as they
+-- land), quest items to the top of Questie's tracker, and green or better
+-- items into your bag; the rest doesn't fly.
 -- /spliffbars loot tests it with a few items.
 
 local _, ns = ...
@@ -47,12 +50,48 @@ local pending = {}   -- loot slot -> { icon, name, quality, count } while its lo
 local flying = 0     -- items sent in the last moment, to space them out
 local lastSent = 0
 
+-- quest items go to the top of Questie's tracker (top left), else the top
+-- of your XP bar, else your bag. A small invisible spot marks where they
+-- land, so it's the tracker's title, not its middle.
+local questSpot = CreateFrame("Frame", nil, UIParent)
+questSpot:SetSize(2, 2)
+local function QuestTarget()
+    local tracker = _G.Questie_BaseFrame
+    questSpot:ClearAllPoints()
+    if tracker and tracker:IsVisible() then
+        questSpot:SetPoint("CENTER", tracker, "TOPLEFT", 40, -10)
+        return questSpot
+    end
+    local xp = _G.XPRepBars_xp
+    if xp and xp:IsVisible() then
+        questSpot:SetPoint("CENTER", xp, "TOP", 0, -10)
+        return questSpot
+    end
+end
+
+-- coins go to the Gold bar when it's showing (else your bag)
+local function GoldTarget()
+    local f = _G.SpliffbarsGold
+    if f and f:IsVisible() then return f end
+end
+
 local function Send(p)
     local now = GetTime()
     if now - lastSent > 0.6 then flying = 0 end
     lastSent = now
-    ns.FlyItem(p.icon, p.quality, p.count, BagTarget(), flying * 0.35, p.name)
+    local gold = p.coins and GoldTarget()
+    local quest = p.quest and not gold and QuestTarget()
+    ns.FlyItem(p.icon, p.quality, p.count, gold or quest or BagTarget(), flying * 0.35, p.name,
+        gold and ns.GoldShine or nil)
     flying = flying + 1
+end
+
+-- is a loot slot coins?
+local MONEY = (Enum and Enum.LootSlotType and Enum.LootSlotType.Money) or LOOT_SLOT_MONEY or 2
+local function IsCoins(slot)
+    if not GetLootSlotType then return false end
+    local ok, t = pcall(GetLootSlotType, slot)
+    return ok and not isSecret(t) and t == MONEY
 end
 
 local events = CreateFrame("Frame")
@@ -74,15 +113,24 @@ events:SetScript("OnEvent", function(_, event, a1, a2, a3)
             local okF, f = pcall(IsFishingLoot)
             fishing = okF and f == true
         end
-        if (GetTime() - minedAt > 6 and not fishing) or next(pending) then return end
+        -- otherwise (mobs, chests) only coins (to the Gold bar) and green or
+        -- better items (to your bag) fly
+        local gathering = GetTime() - minedAt <= 6
+        local mobLoot = not gathering and not fishing
+        if next(pending) then return end
         local ok, n = pcall(GetNumLootItems)
         if not ok or type(n) ~= "number" or isSecret(n) then return end
         for i = 1, n do
-            local ok2, icon, name, count, _, quality = pcall(GetLootSlotInfo, i)
-            if ok2 and icon and not isSecret(icon) then
+            local ok2, icon, name, count, _, quality, _, isQuest = pcall(GetLootSlotInfo, i)
+            local coins = IsCoins(i)
+            local special = type(quality) == "number" and not isSecret(quality) and quality >= 2 -- green+
+            local quest = isQuest == true -- (a hidden value never equals true)
+            if ok2 and icon and not isSecret(icon) and (coins or special or quest or not mobLoot) then
+                -- (coins come as "12 Silver\n3 Copper": one line)
                 pending[i] = { icon = icon, quality = (not isSecret(quality)) and quality or nil,
-                    name = (type(name) == "string" and not isSecret(name)) and name or nil,
-                    count = (type(count) == "number" and not isSecret(count)) and count or 1 }
+                    name = (type(name) == "string" and not isSecret(name)) and name:gsub("\n", " ") or nil,
+                    count = (type(count) == "number" and not isSecret(count)) and count or 1,
+                    coins = coins, quest = quest }
             end
         end
     elseif event == "LOOT_SLOT_CLEARED" then

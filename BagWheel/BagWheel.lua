@@ -48,6 +48,43 @@ local function ItemCount(id)
     return 0
 end
 
+-- Sharpening stones, weightstones and whetstones: using one from the wheel
+-- puts it straight on your main-hand weapon (Shift: off hand) instead of
+-- waiting for you to click the weapon. Found by name.
+local STONE_WORDS = { "sharpening stone", "weightstone", "whetstone" }
+local function IsStone(id)
+    local name
+    if C_Item and C_Item.GetItemNameByID then
+        local ok, n = pcall(C_Item.GetItemNameByID, id)
+        if ok then name = n end
+    end
+    if not name and GetItemInfo then
+        local ok, n = pcall(GetItemInfo, id)
+        if ok then name = n end
+    end
+    if type(name) ~= "string" or isSecret(name) then return false end
+    name = name:lower()
+    for _, w in ipairs(STONE_WORDS) do
+        if name:find(w, 1, true) then return true end
+    end
+    return false
+end
+
+-- what clicking a wheel button does with an item (out of combat only)
+local function SetUse(b, id)
+    if id and IsStone(id) then
+        b:SetAttribute("type1", "macro")
+        b:SetAttribute("*type1", "macro")
+        b:SetAttribute("macrotext", "/use item:" .. id .. "\n/use [mod:shift] 17; 16")
+        b:SetAttribute("item", nil)
+    else
+        b:SetAttribute("type1", "item")
+        b:SetAttribute("*type1", "item")
+        b:SetAttribute("macrotext", nil)
+        b:SetAttribute("item", id and ("item:" .. id) or nil)
+    end
+end
+
 local function ItemIcon(id)
     local f = (C_Item and C_Item.GetItemIconByID) or GetItemIcon
     local ok, icon = pcall(f, id)
@@ -407,7 +444,7 @@ local function Rebuild()
             for _, id in ipairs(owned) do
                 if Uses(id) > Uses(top) then top = id end
             end
-            cat:SetAttribute("item", top and ("item:" .. top) or nil)
+            SetUse(cat, top)
             local shownIcon = top or entry.items[1]
             cat.icon:SetTexture(shownIcon and ItemIcon(shownIcon) or QUESTION)
             cat.icon:SetDesaturated(#owned == 0)
@@ -423,7 +460,7 @@ local function Rebuild()
                     local a = angle - (i - (m + 1) / 2) * itemStep
                     b:ClearAllPoints()
                     b:SetPoint("CENTER", wheel, "CENTER", Pos(a, ITEM_RADIUS))
-                    b:SetAttribute("item", "item:" .. id)
+                    SetUse(b, id)
                     b.itemID = id
                     b.cdItem = id
                     b.icon:SetTexture(ItemIcon(id))
@@ -433,13 +470,13 @@ local function Rebuild()
                 else
                     b.itemID = nil
                     b.cdItem = nil
-                    b:SetAttribute("item", nil)
+                    SetUse(b, nil)
                     b:Hide()
                 end
             end
         else
             cat.cdItem = nil
-            cat:SetAttribute("item", nil)
+            SetUse(cat, nil)
             cat:Hide()
             ring:Hide()
         end

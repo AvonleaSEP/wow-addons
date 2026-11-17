@@ -272,6 +272,11 @@ local function FlierStep(f, elapsed)
             Sparkle(f.x2, f.y2, f.r, f.g, f.b, 6 + math.random() * 6, 0.4 + math.random() * 0.25,
                 math.cos(a) * d, math.sin(a) * d)
         end
+        if f.onArrive then
+            local cb = f.onArrive
+            f.onArrive = nil
+            pcall(cb)
+        end
         return
     end
     local u = Ease(f.t)
@@ -301,7 +306,7 @@ local function FlierStep(f, elapsed)
     end
 end
 
-function ns.FlyItem(icon, quality, count, target, delay, name)
+function ns.FlyItem(icon, quality, count, target, delay, name, onArrive)
     local function Go()
         local f
         for _, x in ipairs(fliers) do
@@ -333,6 +338,7 @@ function ns.FlyItem(icon, quality, count, target, delay, name)
         f.icon:SetTexture(icon)
         f.count:SetText((type(count) == "number" and count > 1) and count or "")
         f.t, f.travel, f.lx, f.ly = 0, 0, nil, nil
+        f.onArrive = onArrive
         f.active = true
         f:ClearAllPoints()
         f:SetPoint("CENTER", UIParent, "BOTTOMLEFT", x0, y0)
