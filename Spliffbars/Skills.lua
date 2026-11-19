@@ -89,11 +89,11 @@ local DEFAULTS = {
     -- weapon: as Devon has them (flat bars without icons, the last 10
     -- levels, low in the middle of the screen)
     weapon = { dir = "DOWN", flip = false, icon = 19, length = 125, gap = 2, icons = false, show = "hands", thick = 0,
-        mote = true, scale = "levels", zoom = 10 },
+        mote = true, scale = "levels", zoom = 10, hidden = false },
     -- trade: as Devon has them (tall standing bars with the game's art, in
     -- the bottom-right corner)
     trade = { dir = "RIGHT", flip = false, icon = 24, length = 160, gap = 12, icons = true, show = "all",
-        thick = 20, art = true, mote = true },
+        thick = 20, art = true, mote = true, hidden = false },
 }
 local DEFAULT_POS = {
     weapon = { point = "BOTTOM", x = 1, y = 203 },
@@ -760,12 +760,29 @@ local function Paint(row)
                 if b.art and not b.sb:GetScript("OnUpdate") then Animate(b, false) end
             end
             -- "Experience Mote": a mote flies from your cursor into the bar first
-            if l.mote and ns.SendMote and b:IsVisible() then SendSkillMote(b, d, c, Land) else Land() end
+            if l.mote and ns.Opt("skillMotes") and ns.SendMote and b:IsVisible() then
+                SendSkillMote(b, d, c, Land)
+            else
+                Land()
+            end
         end
     end
 end
 
 local pending = false
+
+-- "Hide This Bar": the row is gone outside Edit Mode and faded in it. The
+-- trade row holds secure buttons, so it only shows or hides out of combat.
+local function ApplyHidden(row)
+    local l = Look(row.kind)
+    local editing = LEM:IsInEditMode()
+    local show = not l.hidden or editing
+    if row.frame:IsShown() ~= show then
+        if row.secure and InCombatLockdown() then pending = true; return end
+        row.frame:SetShown(show)
+    end
+    row.frame:SetAlpha((l.hidden and editing) and 0.4 or 1)
+end
 
 local function Update()
     if not DB then return end
@@ -822,6 +839,7 @@ local function Update()
         end
         Paint(row)
         row.empty:SetShown(#row.data == 0 and LEM:IsInEditMode())
+        ApplyHidden(row)
     end
 end
 
@@ -928,9 +946,24 @@ local function MakeRow(kind, title, secure)
         settings[#settings + 1] = ColorSetting("Profession Colour", "prof", artOn)
         settings[#settings + 1] = ColorSetting("Secondary Colour", "second", artOn)
     end
+    -- first in the panel: don't use this row at all
+    table.insert(settings, 1, Setting(LEM.SettingType.Checkbox, "Hide This Bar", "hidden", {
+        desc = "Gone outside Edit Mode; shown faded here so you can bring it back.",
+    }, false))
     settings[#settings + 1] = ColorSetting("Capped Colour", "capped")
     settings[#settings + 1] = Setting(LEM.SettingType.Checkbox, "Experience Mote (skill-up)", "mote", nil, false)
     LEM:AddFrameSettings(f, settings)
+    -- for the options panel (Options.lua)
+    ns.RegisterPiece({
+        name = kind == "weapon" and "Weapon Skill Bars" or "Trade Skill Bars",
+        get = function() return DB and Look(kind).hidden or false end,
+        set = function(hidden)
+            if not DB then return end
+            Look(kind).hidden = hidden
+            Update()
+            pcall(LEM.RefreshFrameSettings, LEM, f)
+        end,
+    })
     return row
 end
 
@@ -973,8 +1006,12 @@ LEM:RegisterCallback("layout", function(layout)
     for _, row in pairs(rows) do row.dirty = true end
     Update()
 end)
-LEM:RegisterCallback("enter", function() for _, row in pairs(rows) do row.empty:SetShown(#row.data == 0) end end)
-LEM:RegisterCallback("exit", function() for _, row in pairs(rows) do row.empty:Hide() end end)
+LEM:RegisterCallback("enter", function()
+    for _, row in pairs(rows) do row.empty:SetShown(#row.data == 0); ApplyHidden(row) end
+end)
+LEM:RegisterCallback("exit", function()
+    for _, row in pairs(rows) do row.empty:Hide(); ApplyHidden(row) end
+end)
 
 ---------------------------------------------------------------------------
 -- Events
@@ -1063,6 +1100,7 @@ local function TradeBar(prof)
 end
 
 local function RecipeSwarm(prof)
+    if not ns.Opt("recipeSwarm") then return false end -- off in the options panel
     if GetTime() - lastSwarm < 1.5 then return false end -- one recipe, one swarm
     local b, d = TradeBar(prof)
     if not (b and ns.SendSwarm) then return false end

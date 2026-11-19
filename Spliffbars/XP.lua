@@ -37,11 +37,11 @@ local DEFAULTS = {
             fontSize = 17, textPos = "RIGHT", textX = 0, textY = -24, rotate = false, ticks = true,
             rested = true, hideMax = true, questTimeline = true, playtime = true, questPreview = "hover",
             lifeEvents = true,
-            hoverText = true, tooltip = "default" },
+            hoverText = true, tooltip = "default", hidden = false },
     rep = { vertical = true, fullHeight = true, scale = 1, width = 6, height = 1200, text = "pct",
             custom = "{name}: {standing} {cur} / {max}", font = "2002 Bold", outline = "OUTLINE",
             fontSize = 18, textPos = "RIGHT", textX = 20, textY = 0, rotate = false, ticks = false,
-            hoverText = true, tooltip = "default" },
+            hoverText = true, tooltip = "default", hidden = false },
 }
 
 -- the bar's height: the whole screen ("Fill Screen Height"), or the Height setting
@@ -262,6 +262,7 @@ local repBar = MakeBar("rep", "Reputation Bar")
 local function Arrange(f)
     local l = Look(f.key)
     f:SetScale(l.scale)
+    f:SetAlpha(l.hidden and 0.4 or 1) -- "Hide This Bar": only seen in Edit Mode, faded
     local height = BarHeight(l)
     f:SetSize(l.width, height)
     local orient = l.vertical and "VERTICAL" or "HORIZONTAL"
@@ -327,6 +328,13 @@ local function UpdateXP()
     local disabled = IsXPUserDisabled and IsXPUserDisabled()
     local atMax = AtMaxLevel() or disabled
 
+    -- "Hide This Bar": gone outside Edit Mode (the numbers are still kept
+    -- for the Leveling Journal)
+    if l.hidden and not editing then
+        f:Hide()
+        xpInfo = (not atMax and max > 0) and { cur = cur, max = max, rested = rested, atMax = false } or nil
+        return
+    end
     if atMax and l.hideMax and not editing then
         f:Hide()
         xpInfo = nil
@@ -376,6 +384,11 @@ local repInfo
 local function UpdateRep()
     local f, l = repBar, Look("rep")
     local editing = LEM:IsInEditMode()
+    if l.hidden and not editing then -- "Hide This Bar"
+        repInfo = nil
+        f:Hide()
+        return
+    end
     local name, reaction, low, high, value = WatchedFaction()
     if not name or not (Num(reaction) and Num(low) and Num(high) and Num(value)) then
         repInfo = nil
@@ -1481,11 +1494,13 @@ ns.xpJournal = {
 
 if xpBar.SetMouseClickEnabled then xpBar:SetMouseClickEnabled(true) else xpBar:EnableMouse(true) end
 xpBar:SetScript("OnMouseUp", function(_, button)
-    if button == "LeftButton" and not LEM:IsInEditMode() and ns.ToggleJournal then ns.ToggleJournal() end
+    if button == "LeftButton" and ns.Opt("journalClick") and not LEM:IsInEditMode() and ns.ToggleJournal then
+        ns.ToggleJournal()
+    end
 end)
 -- the last line of the tooltip (hooked after every other part)
 xpBar:HookScript("OnEnter", function(self)
-    if ns.ToggleJournal and GameTooltip:GetOwner() == self and GameTooltip:IsShown() then
+    if ns.ToggleJournal and ns.Opt("journalClick") and GameTooltip:GetOwner() == self and GameTooltip:IsShown() then
         GameTooltip:AddLine(" ")
         GameTooltip:AddLine("Click: Leveling Journal", 0.5, 0.8, 1)
         GameTooltip:Show()
@@ -1610,6 +1625,10 @@ local function Register(f)
         } }),
         Setting(key, LEM.SettingType.Checkbox, "Segment Ticks", "ticks"),
     }
+    -- first in the panel: don't use this bar at all
+    table.insert(settings, 1, Setting(key, LEM.SettingType.Checkbox, "Hide This Bar", "hidden", {
+        desc = "Gone outside Edit Mode; shown faded here so you can bring it back.",
+    }))
     if key == "xp" then
         settings[#settings + 1] = Setting(key, LEM.SettingType.Checkbox, "Show Rested XP", "rested")
         settings[#settings + 1] = Setting(key, LEM.SettingType.Checkbox, "Quest Timeline on Mouseover", "questTimeline")
@@ -1675,6 +1694,38 @@ end
 
 Register(xpBar)
 Register(repBar)
+
+-- for the options panel (Options.lua): show / hide each bar, and the
+-- game's own bits this file can hide
+for _, f in ipairs({ xpBar, repBar }) do
+    ns.RegisterPiece({
+        name = f.editModeName,
+        get = function() return DB and Look(f.key).hidden or false end,
+        set = function(hidden)
+            if not DB then return end
+            Look(f.key).hidden = hidden
+            UpdateAll()
+            pcall(LEM.RefreshFrameSettings, LEM, f)
+        end,
+    })
+end
+local function GameSwitch(name, field, apply)
+    return {
+        name = name,
+        get = function() return DB and DB[field] or false end,
+        set = function(value)
+            if not DB then return end
+            DB[field] = value
+            apply()
+            for _, other in pairs(bars) do pcall(LEM.RefreshFrameSettings, LEM, other) end
+        end,
+    }
+end
+ns.gameUI = {
+    GameSwitch("Hide the game's XP & Rep bars", "hideGame", ApplyGameBars),
+    GameSwitch("Hide the game's party frames", "hideParty", ApplyParty),
+    GameSwitch("Hide the raid manager tab", "hideRaidManager", ApplyRaidManager),
+}
 
 LEM:RegisterCallback("layout", function(layout)
     layoutName = layout

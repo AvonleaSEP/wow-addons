@@ -45,6 +45,39 @@ function ns.ShortMoney(copper)
     return string.format("%dc", math.floor(copper))
 end
 
+---------------------------------------------------------------------------
+-- Account-wide switches (the Spliffbars options panel, Options.lua), kept
+-- in SpliffbarsDB. Read when an effect is about to happen, so a change
+-- takes hold at once.
+---------------------------------------------------------------------------
+ns.OPTION_DEFAULTS = {
+    loot = true,         -- every loot effect (the master switch)
+    lootGather = true,   --   mining, herbs, skinning, fishing -> your bag
+    lootCoins = true,    --   coins -> the Gold bar
+    lootQuest = true,    --   quest items -> the quest tracker
+    lootItems = true,    --   green or better from mobs and chests -> your bag
+    skillMotes = true,   -- skill-up motes (each row's own setting too)
+    recipeSwarm = true,  -- the swarm when you learn a recipe
+    journalClick = true, -- clicking the XP bar opens the Leveling Journal
+}
+
+function ns.Opt(key)
+    local db = SpliffbarsDB
+    if type(db) == "table" and db[key] ~= nil then return db[key] end
+    return ns.OPTION_DEFAULTS[key]
+end
+
+function ns.SetOpt(key, value)
+    SpliffbarsDB = SpliffbarsDB or {}
+    SpliffbarsDB[key] = value
+end
+
+-- Each bar registers here so the options panel can show and hide it:
+-- { name, get = hidden?, set = function(hidden) }. Like Edit Mode's "Hide
+-- This Bar", it's for the Edit Mode layout you're using.
+ns.pieces = {}
+function ns.RegisterPiece(p) ns.pieces[#ns.pieces + 1] = p end
+
 function ns.CharKey()
     local name, realm
     if UnitFullName then name, realm = UnitFullName("player") end
@@ -145,7 +178,8 @@ function ns.Icon(path)
 end
 
 ---------------------------------------------------------------------------
--- /spliffbars            how to set things up
+-- /spliffbars            the options panel (Options.lua)
+-- /spliffbars help       the commands
 -- /spliffbars goal 250   set the gold goal (250, 250g 50s, 1.5k)
 ---------------------------------------------------------------------------
 SLASH_SPLIFFBARS1 = "/spliffbars"
@@ -157,11 +191,14 @@ SlashCmdList.SPLIFFBARS = function(msg)
         if not ns.TestRecipe() then print(ns.PREFIX .. "no trade skill bars showing to send a swarm to.") end
     elseif cmd and cmd:lower() == "journal" and ns.ToggleJournal then
         ns.ToggleJournal()
+    elseif (cmd == "" or cmd:lower() == "options") and ns.OpenOptions then
+        ns.OpenOptions()
     elseif cmd and cmd:lower() == "loot" and ns.TestLoot then
         ns.TestLoot()
     elseif cmd and cmd:lower() == "mote" and ns.TestMote then
         if not ns.TestMote() then print(ns.PREFIX .. "no skill bars showing to send a mote to.") end
     else
+        print(ns.PREFIX .. "/spliffbars  opens the options (show or hide bars, loot and skill effects, and more).")
         print(ns.PREFIX .. "move and set up each piece in Edit Mode (Esc > Edit Mode): XP, Reputation, Gold, Weapon Skills, Trade Skills.")
         print(ns.PREFIX .. "/spliffbars journal (or /lj, or click the XP bar)  opens your Leveling Journal.")
         print(ns.PREFIX .. "/spliffbars goal 250  sets your gold goal.")

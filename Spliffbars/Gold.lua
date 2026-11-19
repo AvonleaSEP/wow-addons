@@ -20,7 +20,7 @@ local LEM, isSecret, Num = ns.LEM, ns.isSecret, ns.Num
 -- wider and the timeline's labels sit to its right.
 local DEFAULTS = {
     width = 475, height = 17, expand = false, expandHeight = 48, text = "goal",
-    font = "Game default", fontSize = 11, shine = true, bigPct = 8, vertical = false,
+    font = "Game default", fontSize = 11, shine = true, bigPct = 8, vertical = false, hidden = false,
 }
 local DEFAULT_POS = { point = "BOTTOMLEFT", x = 24, y = 20 }
 local DEFAULT_GOAL = 100 * 10000 -- 100 gold, in copper
@@ -333,6 +333,15 @@ end
 
 Refresh = function()
     if not DB then return end
+    -- "Hide This Bar": gone outside Edit Mode, faded in it (looted coins
+    -- then fly to your bag instead)
+    local hidden = Look().hidden
+    if hidden and not LEM:IsInEditMode() then
+        bar:Hide()
+        return
+    end
+    bar:Show()
+    bar:SetAlpha(hidden and 0.4 or 1)
     Arrange()
     local money = GetMoney()
     if not Num(money) then money = 0 end
@@ -652,6 +661,9 @@ local function Setting(kind, name, field, extra)
 end
 
 LEM:AddFrameSettings(bar, {
+    Setting(LEM.SettingType.Checkbox, "Hide This Bar", "hidden", {
+        desc = "Gone outside Edit Mode; shown faded here so you can bring it back.",
+    }),
     Setting(LEM.SettingType.Checkbox, "Vertical", "vertical", {
         -- standing it up swaps width and height, so it keeps its shape
         set = function(layout, value)
@@ -691,8 +703,24 @@ LEM:RegisterCallback("layout", function(layout)
     Place()
     Refresh()
 end)
+-- a hidden bar shows (faded) while in Edit Mode
+LEM:RegisterCallback("enter", function() Refresh() end)
+LEM:RegisterCallback("exit", function() Refresh() end)
 
 ns.SetGoldGoal = function(text) if DB then SetGoal(text) end end
+
+-- for the options panel (Options.lua)
+ns.RegisterPiece({
+    name = "Gold Bar",
+    get = function() return DB and Look().hidden or false end,
+    set = function(hidden)
+        if not DB then return end
+        Look().hidden = hidden
+        Refresh()
+        pcall(LEM.RefreshFrameSettings, LEM, bar)
+    end,
+})
+ns.AskGoldGoal = function() StaticPopup_Show("SPLIFFBARS_GOLD_GOAL") end
 
 -- looted coins landing in the bar (Loot.lua): the shine sweeps across
 -- right away and the coin icon pops

@@ -75,7 +75,17 @@ local function GoldTarget()
     if f and f:IsVisible() then return f end
 end
 
+-- the options panel's Loot Effects switches: all of them, or each kind
+local function Allowed(p)
+    if not ns.Opt("loot") then return false end
+    if p.coins then return ns.Opt("lootCoins") end
+    if p.quest then return ns.Opt("lootQuest") end
+    if p.gathered then return ns.Opt("lootGather") end
+    return ns.Opt("lootItems")
+end
+
 local function Send(p)
+    if not Allowed(p) then return end
     local now = GetTime()
     if now - lastSent > 0.6 then flying = 0 end
     lastSent = now
@@ -130,7 +140,7 @@ events:SetScript("OnEvent", function(_, event, a1, a2, a3)
                 pending[i] = { icon = icon, quality = (not isSecret(quality)) and quality or nil,
                     name = (type(name) == "string" and not isSecret(name)) and name:gsub("\n", " ") or nil,
                     count = (type(count) == "number" and not isSecret(count)) and count or 1,
-                    coins = coins, quest = quest }
+                    coins = coins, quest = quest, gathered = not mobLoot }
             end
         end
     elseif event == "LOOT_SLOT_CLEARED" then
@@ -149,9 +159,9 @@ end)
 -- /spliffbars loot: three test items from your cursor
 ns.TestLoot = function()
     local tests = {
-        { icon = "Interface\\Icons\\INV_Ore_Copper_01", name = "Copper Ore", quality = 1, count = 2 },
-        { icon = "Interface\\Icons\\INV_Stone_02", name = "Rough Stone", quality = 1, count = 1 },
-        { icon = "Interface\\Icons\\INV_Misc_Gem_Emerald_03", name = "Malachite", quality = 2, count = 1 },
+        { icon = "Interface\\Icons\\INV_Ore_Copper_01", name = "Copper Ore", quality = 1, count = 2, gathered = true },
+        { icon = "Interface\\Icons\\INV_Stone_02", name = "Rough Stone", quality = 1, count = 1, gathered = true },
+        { icon = "Interface\\Icons\\INV_Misc_Gem_Emerald_03", name = "Malachite", quality = 2, count = 1, gathered = true },
     }
     for _, p in ipairs(tests) do Send(p) end
 end
