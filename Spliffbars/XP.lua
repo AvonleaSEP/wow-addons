@@ -18,6 +18,7 @@
 --
 -- Edit Mode support comes from LibEditMode by p3lim (Libs\LibEditMode).
 
+local _, ns = ...
 local LEM = LibStub("LibEditMode")
 local isSecret = issecretvalue or function() return false end
 local function Num(v) return not isSecret(v) and type(v) == "number" end
@@ -565,7 +566,17 @@ local function TooltipOwner(f)
     return true
 end
 
+-- One blank line between the XP numbers and the rest of the tooltip,
+-- whichever part comes first.
+local tipGapped = false
+local function TipGap()
+    if tipGapped then return end
+    tipGapped = true
+    GameTooltip:AddLine(" ")
+end
+
 xpBar:SetScript("OnEnter", function(self)
+    tipGapped = false
     if not xpInfo or not TooltipOwner(self) then return end
     GameTooltip:AddLine("Experience")
     if xpInfo.atMax then
@@ -610,14 +621,26 @@ end
 local QUEST_COLORS = { { 1, 0.82, 0 }, { 1, 0.55, 0.1 } } -- alternating golds, so neighbours stand apart
 local KILL_COLORS  = { { 0.95, 0.25, 0.25 }, { 0.75, 0.12, 0.12 } } -- reds for kill XP
 local FOUND_COLORS = { { 1, 0.45, 0.8 }, { 0.85, 0.3, 0.65 } }      -- pinks for discovery XP
-local FOUND_ROWS = 3 -- latest areas listed under "Discovered"
-local MAX_LINES = 18
-local KILL_GROUPS = 5 -- mobs listed under "Kills"
 
 local function CharKey()
     local name, realm
     if UnitFullName then name, realm = UnitFullName("player") end
     return (name or UnitName("player") or "?") .. "-" .. (realm or (GetRealmName and GetRealmName()) or "")
+end
+
+-- The leveling journal (Journal.lua): each finished level is kept here,
+-- DB.journal[character][level] = that level's log as it stood at the ding
+-- (quests, kills, discoveries, playtime marks, deaths, close calls, zones),
+-- plus when it finished. The bar-drawing bits (killSegs) are left out.
+local function Archive(q)
+    if not q or not Num(q.level) then return end
+    DB.journal = DB.journal or {}
+    local key = CharKey()
+    DB.journal[key] = DB.journal[key] or {}
+    local copy = CopyTable(q)
+    copy.killSegs = nil
+    copy.finished = time()
+    DB.journal[key][q.level] = copy
 end
 
 -- this character's quests at its current level
@@ -626,13 +649,31 @@ local function QuestLog()
     local key, level = CharKey(), UnitLevel("player")
     local q = DB.quests[key]
     if not q or q.level ~= level then
-        q = { level = level, list = {} }
+        -- a ding: keep the level just finished (only going up; a lower level
+        -- means a new character with the same name)
+        if q and Num(q.level) and Num(level) and level > q.level then Archive(q) end
+        q = { level = level, list = {}, started = time() }
         DB.quests[key] = q
     end
     q.kills = q.kills or {}       -- [mob name] = { n = kills, xp = total }
     q.killSegs = q.killSegs or {} -- stretches of the bar filled by kills
     q.found = q.found or {}       -- areas discovered: { name, xp, s, e }
+    q.zones = q.zones or {}       -- [zone] = XP earned there
+    local max = UnitXPMax("player")
+    if Num(max) and max > 0 then q.max = max end -- the XP this level takes
     return q
+end
+
+local function ZoneName()
+    local z = GetRealZoneText and GetRealZoneText()
+    if isSecret(z) or type(z) ~= "string" or z == "" then z = GetZoneText and GetZoneText() end
+    if isSecret(z) or type(z) ~= "string" or z == "" then return nil end
+    return z
+end
+
+local function AddZoneXP(q, xp)
+    local z = ZoneName()
+    if z then q.zones[z] = (q.zones[z] or 0) + xp end
 end
 
 local lastQuestTitle -- the title on the hand-in window, in case the log has forgotten it
@@ -653,12 +694,15 @@ local function RecordPending()
     if not Num(cur) or not Num(max) or max <= 0 then return end
     local q = QuestLog()
     table.insert(q.list, { name = p.name, xp = p.xp, s = math.max(0, cur - p.xp), e = cur })
-    while #q.list > 40 do table.remove(q.list, 1) end
+    while #q.list > 60 do table.remove(q.list, 1) end
+    -- running totals, kept even when the list drops its oldest
+    q.qn, q.qxp = (q.qn or 0) + 1, (q.qxp or 0) + p.xp
+    AddZoneXP(q, p.xp)
 end
 
 -- A kill: from the game's "<mob> dies, you gain N experience." message.
 -- Back-to-back kills join one stretch on the bar.
-local function RecordKill(mob, xp)
+local function RecordKill(mob, xp, restedBonus)
     if not DB then return end
     local cur, max = UnitXP("player"), UnitXPMax("player")
     if not Num(cur) or not Num(max) or max <= 0 then return end
@@ -666,6 +710,8 @@ local function RecordKill(mob, xp)
     local k = q.kills[mob] or { n = 0, xp = 0 }
     k.n, k.xp = k.n + 1, k.xp + xp
     q.kills[mob] = k
+    if restedBonus then q.restedXP = (q.restedXP or 0) + restedBonus end
+    AddZoneXP(q, xp)
     local s = math.max(0, cur - xp)
     local last = q.killSegs[#q.killSegs]
     if last and math.abs(last.e - s) <= 1 then
@@ -684,6 +730,7 @@ local function RecordFound(area, xp)
     local q = QuestLog()
     q.found[#q.found + 1] = { name = area, xp = xp, s = math.max(0, cur - xp), e = cur }
     while #q.found > 40 do table.remove(q.found, 1) end
+    AddZoneXP(q, xp)
 end
 
 local function ParseFound(msg)
@@ -702,7 +749,10 @@ local function ParseKill(msg)
     if not mob then return nil end
     xp = tonumber((xp:gsub(",", "")))
     if not xp or xp <= 0 then return nil end
-    return mob, xp
+    -- "(+45 exp Rested bonus)": the part of it rested XP gave
+    local bonus = msg:lower():match("%+([%d,]+) exp rested")
+    bonus = bonus and tonumber((bonus:gsub(",", "")))
+    return mob, xp, bonus
 end
 
 -- the slices on the bar
@@ -769,44 +819,13 @@ local function ShowTimeline()
     local title = ("Level %s: |cffffd100%d%% quests|r, |cffff5555%d%% kills|r"):format(
         tostring(q.level), Pct(questXP), Pct(killXP))
     if #found > 0 then title = title .. (", |cffff73cc%d%% discovery|r"):format(Pct(foundXP)) end
-    -- (title goes into the tooltip below)
-
-    local rows = {}
-    local groups = {}
-    for mob, k in pairs(q.kills) do groups[#groups + 1] = { mob = mob, n = k.n, xp = k.xp } end
-    table.sort(groups, function(a, b) return a.xp > b.xp end)
-    local killRows = (killCount > 0) and (1 + math.min(#groups, KILL_GROUPS)) or 0
-    local foundRows = (#found > 0) and (1 + math.min(#found, FOUND_ROWS)) or 0
-    local questRows = math.min(#list, MAX_LINES - killRows - foundRows)
-    for i = 1, questRows do
-        local e = list[#list - i + 1]
-        rows[#rows + 1] = { e.name, "+" .. Big(e.xp), QUEST_COLORS[(#list - i) % 2 + 1] }
-    end
-    if killCount > 0 then
-        rows[#rows + 1] = { ("Kills: %d"):format(killCount), "+" .. Big(killXP), KILL_COLORS[1] }
-        for i = 1, math.min(#groups, KILL_GROUPS) do
-            local g = groups[i]
-            rows[#rows + 1] = { "   " .. g.mob .. " x" .. g.n, "+" .. Big(g.xp), KILL_COLORS[1] }
-        end
-    end
-    if #found > 0 then
-        rows[#rows + 1] = { ("Discovered: %d area%s"):format(#found, #found == 1 and "" or "s"),
-            "+" .. Big(foundXP), FOUND_COLORS[1] }
-        for i = 1, math.min(#found, FOUND_ROWS) do
-            local e = found[#found - i + 1] -- newest first
-            rows[#rows + 1] = { "   " .. e.name, "+" .. Big(e.xp), FOUND_COLORS[1] }
-        end
-    end
-    -- into the game's tooltip, under the XP lines (the bar's OnEnter has just
-    -- filled it; this hook runs after). With the bar's Tooltip set to Off
-    -- there's no tooltip, so no list either.
+    -- one line in the game's tooltip, under the XP lines (the bar's OnEnter
+    -- has just filled it; this hook runs after). The quests, mobs and areas
+    -- themselves are in the Leveling Journal (click the bar). With the bar's
+    -- Tooltip set to Off there's no tooltip, so no line either.
     if GameTooltip:GetOwner() == xpBar and GameTooltip:IsShown() then
-        GameTooltip:AddLine(" ")
+        TipGap()
         GameTooltip:AddLine(title)
-        for _, r in ipairs(rows) do
-            local c = r[3]
-            GameTooltip:AddDoubleLine(r[1], r[2], c[1], c[2], c[3], c[1], c[2], c[3])
-        end
         GameTooltip:Show() -- resize to fit
     end
 end
@@ -865,6 +884,7 @@ local function NoteMilestones()
     if not t or not Num(cur) or not Num(max) or max <= 0 then return end
     local q = QuestLog()
     q.marks = q.marks or {}
+    q.played = t -- time on this level so far, for the journal
     local pct = cur / max * 100
     for m = 10, 90, 10 do
         if pct >= m and not q.marks[m] then q.marks[m] = t end
@@ -1015,7 +1035,7 @@ local function ShowMilestones()
     local now = LevelTime()
     -- time this level, and the pace, in the tooltip
     if now and GameTooltip:GetOwner() == xpBar and GameTooltip:IsShown() then
-        GameTooltip:AddLine(" ")
+        TipGap()
         GameTooltip:AddDoubleLine("Time this level", FormatTime(now), 0.3, 1, 0.3, 1, 1, 1)
         local gained = xpInfo.cur
         if now > 60 and gained > 0 then
@@ -1048,6 +1068,17 @@ playEvents:SetScript("OnEvent", function(_, event, a1, a2)
         end
         NoteMilestones()
     elseif event == "PLAYER_LEVEL_UP" then
+        -- the level just finished: its full time, before the clock starts over
+        -- (a1 = the new level; the log may still be on the old one)
+        local q = DB and DB.quests and DB.quests[CharKey()]
+        local t = LevelTime()
+        if t and Num(a1) then
+            if q and q.level == a1 - 1 then q.played = t end
+            -- or it was already filed (an XP update got there first)
+            local filed = DB.journal and DB.journal[CharKey()] and DB.journal[CharKey()][a1 - 1]
+            if filed then filed.played = t end
+            if q and q.level == a1 then q.played, q.marks = nil, {} end -- those times were the old level's
+        end
         levelBase, levelBaseAt = 0, GetTime() -- the level clock starts over
         C_Timer.After(2, AskPlayed)           -- and the game confirms it
     else -- PLAYER_XP_UPDATE
@@ -1076,9 +1107,9 @@ questEvents:SetScript("OnEvent", function(_, event, questID, xpReward)
         return
     end
     if event == "CHAT_MSG_COMBAT_XP_GAIN" then
-        local mob, xp = ParseKill(questID) -- (the first argument is the message here)
+        local mob, xp, bonus = ParseKill(questID) -- (the first argument is the message here)
         -- read where it landed once the game has added the XP
-        if mob then C_Timer.After(0.3, function() RecordKill(mob, xp) end) end
+        if mob then C_Timer.After(0.3, function() RecordKill(mob, xp, bonus) end) end
         return
     end
     if event == "QUEST_COMPLETE" then
@@ -1192,7 +1223,7 @@ local function NoteEvent(kind, extra)
     if not Num(cur) or not Num(max) or max <= 0 then return end
     local q = QuestLog()
     q.events = q.events or {}
-    local e = { kind = kind, e = cur, when = date("%H:%M") }
+    local e = { kind = kind, e = cur, when = date("%H:%M"), t = time(), zone = ZoneName() }
     for k, v in pairs(extra or {}) do e[k] = v end
     q.events[#q.events + 1] = e
     while #q.events > 60 do table.remove(q.events, 1) end
@@ -1246,26 +1277,21 @@ local function ShowEvents()
     if l.lifeEvents == false then return end
     local events = QuestLog().events or {}
     if #events == 0 then return end
-    local deaths, closes, killers, closest = 0, 0, {}, nil
+    local deaths, closes = 0, 0
     for _, e in ipairs(events) do
-        if e.kind == "death" then
-            deaths = deaths + 1
-            if e.by and not tContains(killers, e.by) then killers[#killers + 1] = e.by end
-        else
-            closes = closes + 1
-            if e.left and (not closest or e.left < closest) then closest = e.left end
-        end
+        if e.kind == "death" then deaths = deaths + 1 else closes = closes + 1 end
     end
+    -- one line: how many of each (who did it and how close: in the journal)
     if GameTooltip:GetOwner() == xpBar and GameTooltip:IsShown() then
-        GameTooltip:AddLine(" ")
+        TipGap()
+        local parts = {}
         if deaths > 0 then
-            GameTooltip:AddDoubleLine("|T" .. SKULL .. ":14|t Deaths this level", deaths
-                .. (#killers > 0 and ("  (" .. table.concat(killers, ", ") .. ")") or ""), 1, 0.4, 0.4, 1, 1, 1)
+            parts[#parts + 1] = ("|T%s:14|t |cffff6666%d death%s|r"):format(SKULL, deaths, deaths == 1 and "" or "s")
         end
         if closes > 0 then
-            GameTooltip:AddDoubleLine("|T" .. CROSS .. ":14|t Close calls", closes
-                .. (closest and ("  (lowest: ~" .. closest .. "% HP)") or ""), 1, 0.6, 0.3, 1, 1, 1)
+            parts[#parts + 1] = ("|T%s:14|t |cffff9a4d%d close call%s|r"):format(CROSS, closes, closes == 1 and "" or "s")
         end
+        GameTooltip:AddLine(table.concat(parts, "   "))
         GameTooltip:Show()
     end
 end
@@ -1381,8 +1407,10 @@ local function PreviewTooltip()
     local l = Look("xp")
     if (l.questPreview or "always") == "off" or #ready.list == 0 then return end
     if not (GameTooltip:GetOwner() == xpBar and GameTooltip:IsShown()) then return end
+    -- one line: how many are ready and where they'd take you (the bar shows
+    -- the block; the quest log has the names)
     local cur, max = xpInfo.cur, xpInfo.max
-    GameTooltip:AddLine(" ")
+    TipGap()
     if ready.xp > 0 then
         local after = cur + ready.xp
         local where
@@ -1395,13 +1423,6 @@ local function PreviewTooltip()
             "+" .. Big(ready.xp) .. "  " .. where, 1, 0.85, 0.35, 1, 0.85, 0.35)
     else
         GameTooltip:AddLine(("Ready to hand in: %d quest%s"):format(#ready.list, #ready.list == 1 and "" or "s"), 1, 0.85, 0.35)
-    end
-    for i = 1, math.min(#ready.list, 8) do
-        local q = ready.list[i]
-        GameTooltip:AddDoubleLine("   " .. q.title, q.xp and ("+" .. Big(q.xp)) or "?", 1, 0.95, 0.7, 1, 0.95, 0.7)
-    end
-    if ready.unknown > 0 then
-        GameTooltip:AddLine("   (the game doesn't say the XP for " .. ready.unknown .. " of them)", 0.6, 0.6, 0.6)
     end
     GameTooltip:Show()
 end
@@ -1436,6 +1457,39 @@ end
 previewEvents:SetScript("OnEvent", function(_, event, unit)
     if event == "UNIT_QUEST_LOG_CHANGED" and unit ~= "player" then return end
     QueuePreview()
+end)
+
+---------------------------------------------------------------------------
+-- The leveling journal (Journal.lua) reads from here. Click the XP bar (or
+-- /spliffbars journal) to open it.
+---------------------------------------------------------------------------
+ns.xpJournal = {
+    -- this level's log so far, its /played time (nil until the game says),
+    -- and the bar's numbers (nil at max level)
+    Current = function()
+        if not DB then return nil end
+        return QuestLog(), LevelTime(), xpInfo
+    end,
+    -- finished levels: [level] = log
+    History = function()
+        if not DB then return {} end
+        DB.journal = DB.journal or {}
+        return DB.journal[CharKey()] or {}
+    end,
+    FormatTime = FormatTime,
+}
+
+if xpBar.SetMouseClickEnabled then xpBar:SetMouseClickEnabled(true) else xpBar:EnableMouse(true) end
+xpBar:SetScript("OnMouseUp", function(_, button)
+    if button == "LeftButton" and not LEM:IsInEditMode() and ns.ToggleJournal then ns.ToggleJournal() end
+end)
+-- the last line of the tooltip (hooked after every other part)
+xpBar:HookScript("OnEnter", function(self)
+    if ns.ToggleJournal and GameTooltip:GetOwner() == self and GameTooltip:IsShown() then
+        GameTooltip:AddLine(" ")
+        GameTooltip:AddLine("Click: Leveling Journal", 0.5, 0.8, 1)
+        GameTooltip:Show()
+    end
 end)
 
 ---------------------------------------------------------------------------

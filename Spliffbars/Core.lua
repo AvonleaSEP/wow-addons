@@ -155,12 +155,15 @@ SlashCmdList.SPLIFFBARS = function(msg)
         ns.SetGoldGoal(rest)
     elseif cmd and cmd:lower() == "recipe" and ns.TestRecipe then
         if not ns.TestRecipe() then print(ns.PREFIX .. "no trade skill bars showing to send a swarm to.") end
+    elseif cmd and cmd:lower() == "journal" and ns.ToggleJournal then
+        ns.ToggleJournal()
     elseif cmd and cmd:lower() == "loot" and ns.TestLoot then
         ns.TestLoot()
     elseif cmd and cmd:lower() == "mote" and ns.TestMote then
         if not ns.TestMote() then print(ns.PREFIX .. "no skill bars showing to send a mote to.") end
     else
         print(ns.PREFIX .. "move and set up each piece in Edit Mode (Esc > Edit Mode): XP, Reputation, Gold, Weapon Skills, Trade Skills.")
+        print(ns.PREFIX .. "/spliffbars journal (or /lj, or click the XP bar)  opens your Leveling Journal.")
         print(ns.PREFIX .. "/spliffbars goal 250  sets your gold goal.")
         print(ns.PREFIX .. "/spliffbars mote  sends a test skill-up mote from your cursor.")
         print(ns.PREFIX .. "/spliffbars loot  sends test mined items from your cursor to your bag.")
