@@ -59,6 +59,7 @@ ns.OPTION_DEFAULTS = {
     skillMotes = true,   -- skill-up motes (each row's own setting too)
     recipeSwarm = true,  -- the swarm when you learn a recipe
     journalClick = true, -- clicking the XP bar opens the Leveling Journal
+    questDrag = true,    -- Shift-drag quest items from Questie's tracker (QuestDrag.lua)
 }
 
 function ns.Opt(key)

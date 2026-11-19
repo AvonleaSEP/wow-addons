@@ -151,6 +151,15 @@ local function Build()
         if ns.TestMote and not ns.TestMote() then print(ns.PREFIX .. "no skill bars showing to send a mote to.") end
     end)
 
+    Heading(R, "Quest Items")
+    Check(R, "Shift-drag items from Questie's tracker to your bars",
+        function() return ns.Opt("questDrag") end,
+        function(v)
+            ns.SetOpt("questDrag", v)
+            if ns.ApplyQuestDrag then ns.ApplyQuestDrag() end
+        end)
+    Note(R, "A plain click still uses the item. Changes made in a fight apply when it ends.", 20)
+
     Heading(R, "Gold")
     Button(R, "Set Gold Goal...", function() if ns.AskGoldGoal then ns.AskGoldGoal() end end)
 end

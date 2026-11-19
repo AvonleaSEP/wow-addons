@@ -15,4 +15,5 @@ Gold.lua
 Mote.lua
 Loot.lua
 Skills.lua
+QuestDrag.lua
 Options.lua
