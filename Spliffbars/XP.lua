@@ -855,6 +855,7 @@ xpBar:HookScript("OnLeave", HideTimeline)
 -- now, so the bar reads like a timeline of the level.
 ---------------------------------------------------------------------------
 local levelBase, levelBaseAt -- /played's "this level" seconds, and GetTime() when we got them
+local playedTotal, playedTotalAt -- /played's total, for the journal's "before the journal"
 
 local function LevelTime()
     if not levelBase then return nil end
@@ -1072,6 +1073,7 @@ playEvents:SetScript("OnEvent", function(_, event, a1, a2)
     elseif event == "TIME_PLAYED_MSG" then
         -- a1 = total played, a2 = this level, in seconds
         if Num(a2) then levelBase, levelBaseAt = a2, GetTime() end
+        if Num(a1) then playedTotal, playedTotalAt = a1, GetTime() end
         if playedQuiet then
             playedQuiet = false
             for i = 1, (NUM_CHAT_WINDOWS or 10) do
@@ -1488,6 +1490,20 @@ ns.xpJournal = {
         if not DB then return {} end
         DB.journal = DB.journal or {}
         return DB.journal[CharKey()] or {}
+    end,
+    -- levels brought in from other addons (RXPGuides' leveling tracker),
+    -- kept here so they stay if that addon goes: [level] = log
+    Imported = function()
+        if not DB then return {} end
+        DB.imported = DB.imported or {}
+        local key = CharKey()
+        DB.imported[key] = DB.imported[key] or {}
+        return DB.imported[key]
+    end,
+    -- /played's total so far (nil until the game has said)
+    PlayedTotal = function()
+        if not playedTotal then return nil end
+        return playedTotal + (GetTime() - playedTotalAt)
     end,
     FormatTime = FormatTime,
 }

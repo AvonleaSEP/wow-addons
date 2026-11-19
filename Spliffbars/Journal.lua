@@ -113,14 +113,134 @@ local function Summarize(q, played, info)
     return s
 end
 
+---------------------------------------------------------------------------
+-- History from before the journal: RXPGuides' leveling tracker keeps each
+-- level it saw (time played, quest XP by zone and quest, mob XP and count
+-- by zone, deaths, start and finish dates). Its finished levels are copied
+-- in once a session (Imported(), kept in Spliffbars' own saved data). No
+-- discoveries, pace or death details: it doesn't keep those.
+---------------------------------------------------------------------------
+local isSecret = ns.isSecret
+
+local function DateOf(d)
+    if type(d) ~= "table" or not Num(d.year) or not Num(d.month) or not Num(d.monthDay) then return nil end
+    local ok, t = pcall(time, { year = d.year, month = d.month, day = d.monthDay, hour = d.hour or 0, min = d.minute or 0 })
+    return ok and t or nil
+end
+
+local function FromRXP(level, d)
+    local log = { level = level, source = "RXPGuides", killsByZone = true,
+        list = {}, kills = {}, found = {}, zones = {}, events = {} }
+    local qn, qxp, kxp = 0, 0, 0
+    for zone, quests in pairs(type(d.quests) == "table" and d.quests or {}) do
+        if type(zone) == "string" and type(quests) == "table" then
+            for id, xp in pairs(quests) do
+                if Num(id) and Num(xp) and xp > 0 then
+                    qn, qxp = qn + 1, qxp + xp
+                    log.list[#log.list + 1] = { id = id, xp = xp }
+                    log.zones[zone] = (log.zones[zone] or 0) + xp
+                end
+            end
+        end
+    end
+    log.qn, log.qxp = qn, qxp
+    -- RXP counts kills per zone, not per mob
+    for zone, m in pairs(type(d.mobs) == "table" and d.mobs or {}) do
+        if type(zone) == "string" and type(m) == "table" and Num(m.xp) and m.xp > 0 then
+            log.kills[zone] = { n = Num(m.count) and m.count or 0, xp = m.xp }
+            log.zones[zone] = (log.zones[zone] or 0) + m.xp
+            kxp = kxp + m.xp
+        end
+    end
+    local ts = type(d.timestamp) == "table" and d.timestamp or {}
+    if Num(ts.started) and Num(ts.finished) and ts.finished > ts.started then log.played = ts.finished - ts.started end
+    log.started, log.finished = DateOf(ts.dateStarted), DateOf(ts.dateFinished)
+    for i = 1, (Num(d.deaths) and d.deaths or 0) do log.events[i] = { kind = "death" } end
+    log.max = qxp + kxp
+    return log, Num(ts.finished)
+end
+
+local importedThisSession = false
+local function ImportRXP(J)
+    if importedThisSession then return end
+    local data = _G.RXPCTrackingData -- RXPGuides' per-character saved data
+    if type(data) ~= "table" or type(data.profiles) ~= "table" then return end
+    importedThisSession = true
+    local guid = UnitGUID("player")
+    if isSecret(guid) then guid = nil end
+    local best = {}
+    for _, prof in pairs(data.profiles) do
+        if type(prof) == "table" and type(prof.levels) == "table"
+            and (not guid or not prof.trackedGuid or prof.trackedGuid == guid) then
+            for lvl, d in pairs(prof.levels) do
+                if Num(lvl) and type(d) == "table" then
+                    local log, done = FromRXP(lvl, d)
+                    -- only finished levels; two profiles with the same level: the fuller one
+                    if done and (not best[lvl] or log.max > best[lvl].max) then best[lvl] = log end
+                end
+            end
+        end
+    end
+    local store = J.Imported()
+    for lvl, log in pairs(best) do store[lvl] = log end
+end
+
+-- The journal's first level began part-way through (no "started"): RXP's
+-- whole-level numbers, with the journal's own deaths, close calls,
+-- discoveries and pace marks.
+local function Merge(rxp, own)
+    local log = {}
+    for k, v in pairs(rxp) do log[k] = v end
+    if #(own.events or {}) >= #(rxp.events or {}) then log.events = own.events end
+    log.found = own.found or log.found
+    log.marks = own.marks
+    log.played = rxp.played or own.played
+    log.finished = own.finished or rxp.finished
+    log.source = "RXPGuides and Spliffbars"
+    return log
+end
+
+-- a quest's name from its ID (RXP keeps IDs): the game, else Questie's data
+local titles = {}
+local function QuestTitle(e)
+    if e.name then return e.name end
+    local id = e.id
+    if not id then return "?" end
+    if titles[id] then return titles[id] end
+    local n
+    if C_QuestLog and C_QuestLog.GetTitleForQuestID then
+        local ok, t = pcall(C_QuestLog.GetTitleForQuestID, id)
+        if ok and type(t) == "string" and not isSecret(t) and t ~= "" then n = t end
+    end
+    if not n and QuestieLoader and QuestieLoader.ImportModule then
+        local ok, qdb = pcall(QuestieLoader.ImportModule, QuestieLoader, "QuestieDB")
+        if ok and type(qdb) == "table" and qdb.QueryQuestSingle then
+            local ok2, t = pcall(qdb.QueryQuestSingle, id, "name")
+            if ok2 and type(t) == "string" and t ~= "" then n = t end
+        end
+    end
+    if n then titles[id] = n end
+    return n or ("Quest " .. id)
+end
+
 -- every level in the journal, newest first
 local function Levels()
     local J = ns.xpJournal
     if not J then return {} end
+    ImportRXP(J)
     local out = {}
     local q, played, info = J.Current()
-    for lvl, log in pairs(J.History()) do
-        if Num(lvl) and not (q and q.level == lvl) then out[#out + 1] = Summarize(log) end
+    local own, imported = J.History(), J.Imported()
+    local all = {}
+    for lvl in pairs(own) do all[lvl] = true end
+    for lvl in pairs(imported) do all[lvl] = true end
+    for lvl in pairs(all) do
+        if Num(lvl) and not (q and q.level == lvl) then
+            local o, r = own[lvl], imported[lvl]
+            local log
+            if o and r and not o.started then log = Merge(r, o) else log = o or r end
+            out[#out + 1] = Summarize(log)
+        end
     end
     if q and Num(q.level) and (info or #(q.list or {}) > 0 or next(q.kills or {})) then
         out[#out + 1] = Summarize(q, played, info)
@@ -414,7 +534,8 @@ local function Pace(P, y, s)
         end
     end
     if most <= 0 then
-        return Note(P, y, s.live and "Shows each tenth as you pass it (the addon needs your /played time, asked at login)."
+        return Note(P, y, (s.live and "Shows each tenth as you pass it (the addon needs your /played time, asked at login).")
+            or (s.q.source and "No pace for this level: RXPGuides doesn't keep it.")
             or "No pace for this level: it was under way before the journal started.")
     end
     local gap, barH = 6, 56
@@ -450,12 +571,29 @@ end
 local function Events(P, y, s)
     local events = s.q.events or {}
     if #events == 0 then return Note(P, y, "No deaths, no close calls. A clean level.", COLORS.good) end
+    -- deaths brought in from RXPGuides are only a count: one line for them
+    local bare, detailed = 0, {}
     for _, e in ipairs(events) do
+        if e.e or e.t or e.when or e.by then detailed[#detailed + 1] = e else bare = bare + 1 end
+    end
+    if bare > 0 then
+        local icon = P:Tex(SKULL)
+        icon:SetPoint("TOPLEFT", 0, y + 1)
+        icon:SetSize(14, 14)
+        local t = P:Text(11, COLORS.death)
+        t:SetPoint("TOPLEFT", 20, y)
+        t:SetText(("%d death%s"):format(bare, bare == 1 and "" or "s"))
+        local w = P:Text(11, DIM)
+        w:SetPoint("TOPLEFT", 280, y)
+        w:SetText("(RXPGuides kept the count only)")
+        y = y - 18
+    end
+    for _, e in ipairs(detailed) do
         local death = e.kind == "death"
         local icon = P:Tex(death and SKULL or CROSS)
         icon:SetPoint("TOPLEFT", 0, y + 1)
         icon:SetSize(14, 14)
-        local at = s.max and s.max > 0 and Pct(math.min(e.e or 0, s.max), s.max) or nil
+        local at = e.e and s.max and s.max > 0 and Pct(math.min(e.e, s.max), s.max) or nil
         local what = death and ("Died" .. (e.by and (" to " .. e.by) or ""))
             or ("Close call" .. (e.left and (": ~" .. e.left .. "% HP left") or ""))
         local c = death and COLORS.death or COLORS.close
@@ -488,6 +626,7 @@ local function LevelPage(P, s)
         local parts = {}
         if s.q.started then parts[#parts + 1] = "Started " .. date("%d %b %Y", s.q.started) end
         if s.q.finished then parts[#parts + 1] = "dinged " .. date("%d %b %Y, %H:%M", s.q.finished) end
+        if s.q.source then parts[#parts + 1] = "from " .. s.q.source end
         sub:SetText(table.concat(parts, ", "))
     end
     y = y - 44
@@ -519,7 +658,7 @@ local function LevelPage(P, s)
     local questRows = {}
     for i = 1, math.min(12, #s.quests) do
         local e = s.quests[i]
-        questRows[#questRows + 1] = { e.name or "?", "+" .. Big(e.xp or 0), COLORS.quest }
+        questRows[#questRows + 1] = { QuestTitle(e), "+" .. Big(e.xp or 0), COLORS.quest }
     end
     local mobRows = {}
     for i = 1, math.min(12, #s.mobs) do
@@ -528,7 +667,7 @@ local function LevelPage(P, s)
     end
     y = Columns(P, y,
         { ("Quests (%d, +%s)"):format(s.questN, Big(s.questXP)), questRows, "No quests handed in" },
-        { ("Kills (%d, +%s)"):format(s.killN, Big(s.killXP)), mobRows, "No kills" })
+        { ("Kills%s (%d, +%s)"):format(s.q.killsByZone and " by zone" or "", s.killN, Big(s.killXP)), mobRows, "No kills" })
 
     local foundRows = {}
     for i = #(s.q.found or {}), 1, -1 do
@@ -671,7 +810,7 @@ local TABLE_COLS = { -- header, x, width, right-aligned
     { "Deaths", 450, 56, true }, { "Close calls", 512, 76, true },
 }
 
-local function Table(P, y, levels)
+local function Table(P, y, levels, before)
     for _, col in ipairs(TABLE_COLS) do
         local h = P:Text(10, GOLD, col[4] and "RIGHT" or "LEFT")
         h:SetPoint("TOPLEFT", col[2], y)
@@ -692,7 +831,7 @@ local function Table(P, y, levels)
             z:SetSize(BODY_W + 8, 18)
         end
         local cells = {
-            { tostring(s.level) .. (s.live and " |cff4dff4dnow|r" or ""), WHITE },
+            { tostring(s.level) .. (s.q.source and "*" or "") .. (s.live and " |cff4dff4dnow|r" or ""), WHITE },
             { Time(s.played), WHITE },
             { s.rate and Big(s.rate) or "?", COLORS.pace },
             { Pct(s.questXP, s.total) .. "%", COLORS.quest },
@@ -706,6 +845,18 @@ local function Table(P, y, levels)
             t:SetPoint("TOPLEFT", col[2], y)
             t:SetWidth(col[3])
             t:SetText(cells[c][1])
+        end
+        y = y - 18
+    end
+    -- the levels before any tracking, as one row: only their time is known
+    if before then
+        local cells = { before.from .. "-" .. before.to, Time(before.played) }
+        for c = 1, #TABLE_COLS do
+            local col = TABLE_COLS[c]
+            local t = P:Text(11, DIM, col[4] and "RIGHT" or "LEFT")
+            t:SetPoint("TOPLEFT", col[2], y)
+            t:SetWidth(col[3])
+            t:SetText(cells[c] or "-")
         end
         y = y - 18
     end
@@ -735,14 +886,23 @@ local function OverviewPage(P, levels)
         deaths, closes = deaths + s.deaths, closes + s.closes
         quests, kills = quests + s.questN, kills + s.killN
     end
+    -- /played covers everything: what it has beyond the logged levels is the
+    -- time on the levels before any tracking
+    local total = ns.xpJournal.PlayedTotal()
+    local before
+    if total and lowest > 1 and total - played > 60 then before = total - played end
     y = Tiles(P, y, {
         { tostring(#levels), "Levels logged", WHITE },
-        { Time(played > 0 and played or nil), "Time played", COLORS.good },
+        { Time(total or (played > 0 and played) or nil), total and "Time played (/played)" or "Time played", COLORS.good },
         { timed > 0 and Time(played / timed) or "?", "Average level", COLORS.pace },
         { Big(quests), "Quests", COLORS.quest },
         { Big(kills), "Kills", COLORS.kill },
         { deaths .. " / " .. closes, "Deaths / close calls", (deaths > 0 and COLORS.death) or DIM },
     })
+    if before then
+        y = Note(P, y + 6, ("Levels 1 to %d aren't in the journal: about %s of play before it (from /played)."):format(
+            lowest - 1, Time(before)), COLORS.pace) - 8
+    end
 
     y = Heading(P, y, "Time per level", "hover a bar for its numbers, click it for the level")
     y = Chart(P, y, levels)
@@ -770,13 +930,16 @@ local function OverviewPage(P, levels)
     end
     if killiest then right[#right + 1] = { "Most kills", "Level " .. killiest.level .. ", " .. Big(killiest.killN), COLORS.kill } end
     if bigQuest then
-        right[#right + 1] = { "Biggest quest", (bigQuest.name or "?") .. " (+" .. Big(bigQuest.xp or 0) .. ", " .. bigQuestLevel .. ")",
+        right[#right + 1] = { "Biggest quest", QuestTitle(bigQuest) .. " (+" .. Big(bigQuest.xp or 0) .. ", " .. bigQuestLevel .. ")",
             COLORS.quest }
     end
     y = Columns(P, y, { "Records", left, "Finish a level to set one" }, { "Worst and best", right, "No deaths yet" })
 
     y = Heading(P, y, "Every level")
-    y = Table(P, y, levels)
+    y = Table(P, y, levels, before and { from = 1, to = lowest - 1, played = before } or nil)
+    if next(ns.xpJournal.Imported()) then
+        y = Note(P, y, "Levels marked * come from RXPGuides' leveling tracker (kept here too).")
+    end
     return y
 end
 
