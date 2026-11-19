@@ -15,9 +15,12 @@ local _, ns = ...
 local LEM, isSecret, Num = ns.LEM, ns.isSecret, ns.Num
 
 -- as Devon has it: a long, slim bar along the bottom-left corner
+-- Vertical: the bar stands up and fills bottom to top; Width and Height
+-- swap so it keeps its shape, the text hides (no room), the hover grows it
+-- wider and the timeline's labels sit to its right.
 local DEFAULTS = {
     width = 475, height = 17, expand = false, expandHeight = 48, text = "goal",
-    font = "Game default", fontSize = 11, shine = true, bigPct = 8,
+    font = "Game default", fontSize = 11, shine = true, bigPct = 8, vertical = false,
 }
 local DEFAULT_POS = { point = "BOTTOMLEFT", x = 24, y = 20 }
 local DEFAULT_GOAL = 100 * 10000 -- 100 gold, in copper
@@ -268,17 +271,64 @@ local pool = {}
 
 local hovered = false
 
+-- the bar's length (along the fill) and thickness (across it, grown while
+-- hovered with Grow on Hover), whichever way it stands
+local function Dims()
+    local l = Look()
+    local vertical = l.vertical and true or false
+    local long = vertical and l.height or l.width
+    local thick = vertical and l.width or l.height
+    if hovered and l.expand then thick = math.max(l.expandHeight, thick) end
+    return vertical, long, thick
+end
+
 local function Arrange()
     local l = Look()
-    local h = (hovered and l.expand) and math.max(l.expandHeight, l.height) or l.height
-    bar:SetSize(l.width, h)
-    coin:SetSize(math.max(8, math.min(h - 6, 14)), math.max(8, math.min(h - 6, 14)))
-    gloss:SetHeight(math.max(1, (h - 4) * 0.45))
-    shineHolder:SetHeight(h)
+    local vertical, long, thick = Dims()
+    if vertical then bar:SetSize(thick, long) else bar:SetSize(long, thick) end
+    sb:SetOrientation(vertical and "VERTICAL" or "HORIZONTAL")
+    -- shading runs across the bar: amber to bright gold, bottom to top when
+    -- it lies down, left to right when it stands
+    ns.Gradient(sb.grad, vertical and "HORIZONTAL" or "VERTICAL", 0.55, 0.36, 0.04, 1, 1, 0.86, 0.36, 1)
+
+    local cs = math.max(8, math.min(thick - 6, 14))
+    coin:SetSize(cs, cs)
+    coin:ClearAllPoints()
+    gloss:ClearAllPoints()
     shineHolder:ClearAllPoints()
-    shineHolder:SetPoint("RIGHT", sb, "LEFT", 0, 0)
-    move:SetOffset(l.width + 40, 0)
+    shineL:ClearAllPoints()
+    shineR:ClearAllPoints()
+    if vertical then
+        coin:SetPoint("BOTTOM", 0, 4)
+        -- gloss: a light band down the left side
+        gloss:SetPoint("TOPLEFT", sb, "TOPLEFT")
+        gloss:SetPoint("BOTTOMLEFT", sb, "BOTTOMLEFT")
+        gloss:SetWidth(math.max(1, (thick - 4) * 0.45))
+        ns.Gradient(gloss, "HORIZONTAL", 1, 0.97, 0.85, 0.35, 1, 1, 1, 0)
+        -- shine: sweeps up from below the bar
+        shineHolder:SetSize(thick, 40)
+        shineHolder:SetPoint("TOP", sb, "BOTTOM", 0, 0)
+        shineL:SetPoint("BOTTOMLEFT"); shineL:SetPoint("BOTTOMRIGHT"); shineL:SetHeight(20)
+        ns.Gradient(shineL, "VERTICAL", 1, 0.95, 0.75, 0, 1, 0.95, 0.75, 0.55)
+        shineR:SetPoint("TOPLEFT"); shineR:SetPoint("TOPRIGHT"); shineR:SetHeight(20)
+        ns.Gradient(shineR, "VERTICAL", 1, 0.95, 0.75, 0.55, 1, 0.95, 0.75, 0)
+        move:SetOffset(0, long + 40)
+    else
+        coin:SetPoint("LEFT", 4, 0)
+        gloss:SetPoint("TOPLEFT", sb, "TOPLEFT")
+        gloss:SetPoint("TOPRIGHT", sb, "TOPRIGHT")
+        gloss:SetHeight(math.max(1, (thick - 4) * 0.45))
+        ns.Gradient(gloss, "VERTICAL", 1, 1, 1, 0, 1, 0.97, 0.85, 0.35)
+        shineHolder:SetSize(40, thick)
+        shineHolder:SetPoint("RIGHT", sb, "LEFT", 0, 0)
+        shineL:SetPoint("TOPLEFT"); shineL:SetPoint("BOTTOMLEFT"); shineL:SetWidth(20)
+        ns.Gradient(shineL, "HORIZONTAL", 1, 0.95, 0.75, 0, 1, 0.95, 0.75, 0.55)
+        shineR:SetPoint("TOPRIGHT"); shineR:SetPoint("BOTTOMRIGHT"); shineR:SetWidth(20)
+        ns.Gradient(shineR, "HORIZONTAL", 1, 0.95, 0.75, 0.55, 1, 0.95, 0.75, 0)
+        move:SetOffset(long + 40, 0)
+    end
     ns.ApplyFont(label, l.font, l.fontSize, "OUTLINE")
+    label:SetShown(not vertical) -- no room for text on a standing bar
 end
 
 Refresh = function()
@@ -327,6 +377,7 @@ local function Parts(i)
     p = {
         pin = timeline:CreateTexture(nil, "OVERLAY"),
         lead = timeline:CreateTexture(nil, "OVERLAY"),
+        rise = timeline:CreateTexture(nil, "OVERLAY"), -- standing bar: the bend up or down to a nudged label
         icon = timeline:CreateTexture(nil, "OVERLAY"),
         text = timeline:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall"),
     }
@@ -341,18 +392,73 @@ local function ShowTimeline()
     -- sizes from the settings (the bar was just resized; its rect may not
     -- have caught up yet)
     local l = Look()
-    local w = l.width - 4
-    local h = ((hovered and l.expand) and math.max(l.expandHeight, l.height) or l.height) - 4
+    local vertical, long, thick = Dims()
+    local w = long - 4  -- along the fill
+    local h = thick - 4 -- across it
     local size = math.max(8, l.fontSize - 1)
-    -- sort by position along the bar; give each label a row above the bar
-    -- where it fits, up to three rows (more go in the tooltip only)
+    -- sort by position along the bar
     local items = {}
     for _, e in ipairs(events) do
         items[#items + 1] = { e = e, x = w * math.min(e.money / goal, 1) }
     end
     table.sort(items, function(a, b) return a.x < b.x end)
-    local rowEnd = { -1e9, -1e9, -1e9 }
     local n = 0
+
+    if vertical then
+        -- standing bar: a line across it at each moment, the label to its
+        -- right; labels that would overlap are nudged up, the leader bending
+        -- to reach them, and those that run past the top are left to the
+        -- tooltip
+        local gap = size + 5
+        local OUT, BEND = 6, 4
+        local last
+        for _, it in ipairs(items) do
+            local ly = last and math.max(it.x, last + gap) or it.x
+            if ly > w + gap then break end
+            last = ly
+            n = n + 1
+            local p = Parts(n)
+            local e = it.e
+            p.pin:SetColorTexture(1, 0.95, 0.7, 0.9)
+            p.pin:ClearAllPoints()
+            p.pin:SetSize(h, 1)
+            p.pin:SetPoint("BOTTOMLEFT", sb, "BOTTOMLEFT", 0, it.x)
+            p.lead:SetColorTexture(1, 0.85, 0.4, 0.7)
+            p.lead:ClearAllPoints()
+            p.lead:SetSize(OUT, 1)
+            p.lead:SetPoint("BOTTOMLEFT", sb, "BOTTOMRIGHT", 2, it.x)
+            p.rise:SetColorTexture(1, 0.85, 0.4, 0.7)
+            p.rise:ClearAllPoints()
+            if math.abs(ly - it.x) >= 1 then
+                p.rise:SetSize(1, math.abs(ly - it.x) + 1)
+                p.rise:SetPoint("BOTTOMLEFT", sb, "BOTTOMRIGHT", 2 + OUT, math.min(it.x, ly))
+                p.rise:Show()
+            else
+                p.rise:Hide()
+            end
+            p.icon:SetTexture(e.icon or ns.Icon(KIND_ICON[e.kind] or "INV_Misc_Coin_01"))
+            p.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+            p.icon:ClearAllPoints()
+            p.icon:SetSize(size + 2, size + 2)
+            p.icon:SetPoint("LEFT", sb, "BOTTOMRIGHT", 2 + OUT + BEND, ly)
+            ns.ApplyFont(p.text, l.font, size, "OUTLINE")
+            p.text:SetText("+" .. ns.ShortMoney(e.amount))
+            p.text:ClearAllPoints()
+            p.text:SetPoint("LEFT", p.icon, "RIGHT", 2, 0)
+            p.text:SetTextColor(1, 0.86, 0.4)
+            p.pin:Show(); p.lead:Show(); p.icon:Show(); p.text:Show()
+        end
+        for i = n + 1, #pool do
+            local p = pool[i]
+            p.pin:Hide(); p.lead:Hide(); p.rise:Hide(); p.icon:Hide(); p.text:Hide()
+        end
+        timeline:Show()
+        return
+    end
+
+    -- lying bar: each label gets a row above the bar where it fits, up to
+    -- three rows (more go in the tooltip only)
+    local rowEnd = { -1e9, -1e9, -1e9 }
     for _, it in ipairs(items) do
         local p = Parts(n + 1)
         local e = it.e
@@ -384,14 +490,14 @@ local function ShowTimeline()
             p.text:ClearAllPoints()
             p.text:SetPoint("LEFT", p.icon, "RIGHT", 2, 0)
             p.text:SetTextColor(1, 0.86, 0.4)
-            p.pin:Show(); p.lead:Show(); p.icon:Show(); p.text:Show()
+            p.pin:Show(); p.lead:Show(); p.rise:Hide(); p.icon:Show(); p.text:Show()
         else
             p.text:Hide()
         end
     end
     for i = n + 1, #pool do
         local p = pool[i]
-        p.pin:Hide(); p.lead:Hide(); p.icon:Hide(); p.text:Hide()
+        p.pin:Hide(); p.lead:Hide(); p.rise:Hide(); p.icon:Hide(); p.text:Hide()
     end
     timeline:Show()
 end
@@ -546,16 +652,27 @@ local function Setting(kind, name, field, extra)
 end
 
 LEM:AddFrameSettings(bar, {
-    Setting(LEM.SettingType.Slider, "Width", "width", { minValue = 60, maxValue = 800, valueStep = 1 }),
-    Setting(LEM.SettingType.Slider, "Height", "height", { minValue = 6, maxValue = 60, valueStep = 1 }),
+    Setting(LEM.SettingType.Checkbox, "Vertical", "vertical", {
+        -- standing it up swaps width and height, so it keeps its shape
+        set = function(layout, value)
+            layoutName = layout
+            local l = Look()
+            if (l.vertical and true or false) ~= value then l.width, l.height = l.height, l.width end
+            l.vertical = value
+            Refresh()
+            pcall(LEM.RefreshFrameSettings, LEM, bar) -- greys Text in and out
+        end,
+    }),
+    Setting(LEM.SettingType.Slider, "Width", "width", { minValue = 6, maxValue = 1000, valueStep = 1 }),
+    Setting(LEM.SettingType.Slider, "Height", "height", { minValue = 6, maxValue = 1000, valueStep = 1 }),
     Setting(LEM.SettingType.Checkbox, "Grow on Hover", "expand"),
-    Setting(LEM.SettingType.Slider, "Hover Height", "expandHeight", {
+    Setting(LEM.SettingType.Slider, "Hover Thickness", "expandHeight", {
         minValue = 12, maxValue = 160, valueStep = 1, disabled = function() return not Look().expand end,
     }),
-    Setting(LEM.SettingType.Dropdown, "Text", "text", { values = {
+    Setting(LEM.SettingType.Dropdown, "Text (hidden when vertical)", "text", { values = {
         { text = "Gold / goal / %", value = "goal" }, { text = "Gold", value = "money" },
         { text = "%", value = "pct" }, { text = "None", value = "none" },
-    } }),
+    }, disabled = function() return Look().vertical end }),
     Setting(LEM.SettingType.Dropdown, "Font", "font", { values = ns.FontChoices, height = 300 }),
     Setting(LEM.SettingType.Slider, "Font Size", "fontSize", { minValue = 6, maxValue = 24, valueStep = 1 }),
     Setting(LEM.SettingType.Checkbox, "Shine", "shine"),
