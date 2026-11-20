@@ -385,6 +385,9 @@ local function Scroller(parent, w, h)
     return sf
 end
 
+-- the same blocks for the modules' windows (Spliff Gold's Money Book)
+ns.JournalKit = { NewText = NewText, NewPool = NewPool, Scroller = Scroller }
+
 ---------------------------------------------------------------------------
 -- Pieces of a page. Each takes the pool and the y to start at (0 at the
 -- top, going down), and returns the y below it.

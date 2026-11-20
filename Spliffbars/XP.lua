@@ -82,6 +82,8 @@ local DB
 local layoutName
 
 local function Look(key)
+    -- Edit Mode can ask before the saved settings have loaded: the defaults for now
+    if not DB then return CopyTable(DEFAULTS[key]) end
     DB.layouts = DB.layouts or {}
     local lname = layoutName or "Default"
     DB.layouts[lname] = DB.layouts[lname] or {}

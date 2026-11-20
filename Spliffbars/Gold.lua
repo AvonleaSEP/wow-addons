@@ -95,7 +95,11 @@ local function NoteSale(bag, slot)
         if ok then link, count, icon = lk, ct, ic end
     end
     if type(link) ~= "string" or isSecret(link) then return end
-    local name, _, _, _, _, _, _, _, _, _, sellPrice = GetItemInfo(link)
+    -- (this client keeps it under C_Item; the old name may be missing)
+    local getInfo = (C_Item and C_Item.GetItemInfo) or GetItemInfo
+    if not getInfo then return end
+    local ok2, name, _, _, _, _, _, _, _, _, _, sellPrice = pcall(getInfo, link)
+    if not ok2 then return end
     count = Num(count) and count or 1
     if not Num(sellPrice) or sellPrice <= 0 then return end
     recentSales[#recentSales + 1] = { name = name or link, icon = icon, value = sellPrice * count, count = count, at = GetTime() }
@@ -565,8 +569,20 @@ local function Tooltip(self)
                 .. (e.text and (": " .. e.text) or ""), "+" .. ns.Money(e.amount), 1, 0.9, 0.6, 1, 1, 1)
         end
     end
+    if ns.ToggleMoneyBook and ns.Opt("goldClick") then
+        GameTooltip:AddLine(" ")
+        GameTooltip:AddLine("Click: Money Book", 0.5, 0.8, 1)
+    end
     GameTooltip:Show()
 end
+
+-- a click opens the Money Book (the SpliffGold module sets ns.ToggleMoneyBook)
+if bar.SetMouseClickEnabled then bar:SetMouseClickEnabled(true) end
+bar:SetScript("OnMouseUp", function(_, button)
+    if button == "LeftButton" and ns.Opt("goldClick") and ns.ToggleMoneyBook and not LEM:IsInEditMode() then
+        ns.ToggleMoneyBook()
+    end
+end)
 
 bar:SetScript("OnEnter", function(self)
     hovered = true
@@ -734,6 +750,167 @@ ns.GoldShine = function()
     sweep:Play()
     coinPop:Stop()
     coinPop:Play()
+end
+
+---------------------------------------------------------------------------
+-- Looted coins (ns.GoldHop, from Loot.lua): a few little coins hop up out
+-- of the bar at spots along the gold you have, each drifting a little
+-- along it, and drop back in with a tiny ring and sparkles. Gold, silver
+-- and copper coins for what you looted. Once they've all landed the shine
+-- sweeps across. On a standing bar they hop out to its right.
+---------------------------------------------------------------------------
+local COIN_TEX = {
+    gold = "Interface\\MoneyFrame\\UI-GoldIcon",
+    silver = "Interface\\MoneyFrame\\UI-SilverIcon",
+    copper = "Interface\\MoneyFrame\\UI-CopperIcon",
+}
+local COIN_TINT = { gold = { 1, 0.85, 0.35 }, silver = { 0.85, 0.9, 1 }, copper = { 1, 0.6, 0.35 } }
+local RING = "Interface\\Cooldown\\ping4"
+
+local hopLayer = CreateFrame("Frame", nil, bar)
+hopLayer:SetAllPoints(sb)
+hopLayer:SetFrameStrata("HIGH") -- above the bar and whatever's next to it
+local hoppers = {}
+
+local function Hopper()
+    for _, h in ipairs(hoppers) do
+        if not h.busy then return h end
+    end
+    local h = CreateFrame("Frame", nil, hopLayer)
+    h:SetSize(13, 13)
+    h:Hide()
+    h.tex = h:CreateTexture(nil, "OVERLAY")
+    h.tex:SetAllPoints()
+    h.ring = hopLayer:CreateTexture(nil, "OVERLAY")
+    h.ring:SetTexture(RING)
+    h.ring:SetBlendMode("ADD")
+    h.ring:SetSize(14, 14)
+    h.ring:Hide()
+    h.ringAnim = h.ring:CreateAnimationGroup()
+    local grow = h.ringAnim:CreateAnimation("Scale")
+    grow:SetScale(2.2, 2.2)
+    grow:SetDuration(0.35)
+    grow:SetSmoothing("OUT")
+    local fade = h.ringAnim:CreateAnimation("Alpha")
+    fade:SetFromAlpha(0.9)
+    fade:SetToAlpha(0)
+    fade:SetDuration(0.35)
+    h.ringAnim:SetScript("OnFinished", function() h.ring:Hide() end)
+    hoppers[#hoppers + 1] = h
+    return h
+end
+
+-- where a coin is: "along" the bar from its start, "up" out of it
+local function PlaceHop(region, h, along, up)
+    region:ClearAllPoints()
+    if h.vertical then
+        region:SetPoint("CENTER", sb, "BOTTOM", up, along)
+    else
+        region:SetPoint("CENTER", sb, "LEFT", along, up)
+    end
+end
+
+local function Burst(h, n, size)
+    if not ns.Sparkle then return end
+    local x, y = h:GetCenter()
+    if not x then return end
+    local k = h:GetEffectiveScale() / UIParent:GetEffectiveScale()
+    x, y = x * k, y * k
+    local c = h.tint
+    for i = 1, n do
+        local a = (i / n) * 2 * math.pi + math.random() * 0.6
+        local d = 6 + math.random() * 8
+        ns.Sparkle(x, y, c[1], c[2], c[3], size + math.random() * 4, 0.3 + math.random() * 0.2,
+            math.cos(a) * d, math.sin(a) * d)
+    end
+end
+
+local function HopStep(h, elapsed)
+    h.t = h.t + elapsed / h.dur
+    local t = math.min(h.t, 1)
+    -- a hop: straight up and back down, drifting along the bar
+    local along = h.a0 + (h.a1 - h.a0) * t
+    local up = h.peak * 4 * t * (1 - t)
+    PlaceHop(h, h, along, up)
+    -- pops in quick, sinks a little smaller as it drops back in
+    local size = h.size * (0.45 + 0.55 * math.min(1, t * 5)) * (t > 0.8 and (1 - (t - 0.8) * 1.75) or 1)
+    h:SetSize(size, size)
+    if h.tex.SetRotation then h.tex:SetRotation(h.spin * t) end
+    h:SetAlpha(t > 0.9 and (1 - (t - 0.9) * 6) or 1)
+    if h.t < 1 then return end
+
+    -- landed: a little ring, a few sparkles, and once the last is in, the shine
+    h:SetScript("OnUpdate", nil)
+    PlaceHop(h.ring, h, h.a1, 0)
+    local c = h.tint
+    h.ring:SetVertexColor(c[1], c[2], c[3])
+    h.ringAnim:Stop()
+    h.ring:Show()
+    h.ringAnim:Play()
+    Burst(h, 4, 4)
+    h:Hide()
+    h.busy = false
+    local batch = h.batch
+    batch.left = batch.left - 1
+    if batch.left == 0 then ns.GoldShine() end
+end
+
+-- the coins for a loot line like "1 Gold 12 Silver 3 Copper" (the game's
+-- own wording, so any language): more coins for the bigger kinds
+local function Amount(text, fmt)
+    if type(text) ~= "string" or type(fmt) ~= "string" then return nil end
+    local pattern = (fmt:gsub("%%d", "(%%d+)"))
+    return tonumber(text:match(pattern))
+end
+
+local function CoinKinds(text)
+    local g, s, c = Amount(text, GOLD_AMOUNT), Amount(text, SILVER_AMOUNT), Amount(text, COPPER_AMOUNT)
+    local kinds = {}
+    local function Add(kind, n) for _ = 1, n do kinds[#kinds + 1] = kind end end
+    if g then Add("gold", 3) end
+    if s then Add("silver", g and 1 or 2) end
+    if c then Add("copper", (g or s) and 1 or 2) end
+    if #kinds == 0 then Add("silver", 2); Add("copper", 1) end
+    while #kinds > 5 do table.remove(kinds) end
+    return kinds
+end
+
+-- false when the bar isn't showing (the coins fly to your bag instead)
+ns.GoldHop = function(text)
+    if not bar:IsVisible() then return false end
+    local vertical, long = Dims()
+    local length = long - 4
+    local money = GetMoney()
+    local fill = Num(money) and math.min(money / Goal(), 1) or 1
+    -- they hop out of the gold you have (or the start of the bar, when it's
+    -- nearly empty), and drift up to a couple of coins' width either way
+    local reach = math.max(0.15, fill) * length
+    local kinds = CoinKinds(text)
+    local batch = { left = #kinds }
+    for i, kind in ipairs(kinds) do
+        local h = Hopper()
+        h.busy = true
+        h.batch = batch
+        h.vertical = vertical
+        h.a0 = reach * (0.06 + math.random() * 0.88)
+        h.a1 = math.max(4, math.min(length - 4, h.a0 + (math.random() - 0.5) * 56))
+        h.peak = 16 + math.random() * 18
+        h.dur = 0.55 + math.random() * 0.25
+        h.spin = (math.random() - 0.5) * 5
+        h.size = 13
+        h.tint = COIN_TINT[kind]
+        h.tex:SetTexture(COIN_TEX[kind])
+        h.t = 0
+        C_Timer.After((i - 1) * 0.09, function()
+            PlaceHop(h, h, h.a0, 0)
+            h:SetSize(h.size * 0.45, h.size * 0.45)
+            h:SetAlpha(1)
+            h:Show()
+            Burst(h, 2, 3) -- a glint where it leaves the bar
+            h:SetScript("OnUpdate", HopStep)
+        end)
+    end
+    return true
 end
 
 ---------------------------------------------------------------------------

@@ -8,6 +8,10 @@
 
 local _, ns = ...
 
+-- Spliffbars is the hub of the Spliff package: modules in their own
+-- folders (SpliffFrames ...) reach these shared bits through this global.
+_G.Spliffbars = ns
+
 ns.LEM = LibStub("LibEditMode")
 ns.PREFIX = "|cffe8c45aSpliffbars|r "
 
@@ -59,6 +63,7 @@ ns.OPTION_DEFAULTS = {
     skillMotes = true,   -- skill-up motes (each row's own setting too)
     recipeSwarm = true,  -- the swarm when you learn a recipe
     journalClick = true, -- clicking the XP bar opens the Leveling Journal
+    goldClick = true,    -- clicking the Gold bar opens the Money Book (SpliffGold module)
     questDrag = true,    -- Shift-drag quest items from Questie's tracker (QuestDrag.lua)
 }
 
@@ -72,6 +77,61 @@ function ns.SetOpt(key, value)
     SpliffbarsDB = SpliffbarsDB or {}
     SpliffbarsDB[key] = value
 end
+
+---------------------------------------------------------------------------
+-- Modules: the bigger pieces of the package live in their own folders and
+-- load only when switched on (the options panel's Modules), so a module
+-- that's off runs no code at all. A module says it is one in its .toc:
+--   ## Dependencies: Spliffbars
+--   ## LoadOnDemand: 1
+--   ## X-Spliff-Module: Unit Frames     (its name in the options)
+--   ## X-Spliff-Default: off            (optional: off until switched on)
+-- Switching one on or off takes a /reload (code can't be unloaded).
+---------------------------------------------------------------------------
+local AddOns = C_AddOns or {}
+local NumAddOns = AddOns.GetNumAddOns or GetNumAddOns
+local AddOnInfo = AddOns.GetAddOnInfo or GetAddOnInfo
+local AddOnMeta = AddOns.GetAddOnMetadata or GetAddOnMetadata
+local LoadModule = AddOns.LoadAddOn or LoadAddOn
+local IsLoaded = AddOns.IsAddOnLoaded or IsAddOnLoaded
+
+function ns.Modules()
+    local out = {}
+    if not (NumAddOns and AddOnInfo and AddOnMeta) then return out end
+    for i = 1, NumAddOns() do
+        local name = AddOnInfo(i)
+        local label = type(name) == "string" and AddOnMeta(name, "X-Spliff-Module")
+        if label then
+            out[#out + 1] = { addon = name, name = label, notes = AddOnMeta(name, "Notes"),
+                default = (AddOnMeta(name, "X-Spliff-Default") or ""):lower() ~= "off" }
+        end
+    end
+    table.sort(out, function(a, b) return a.name < b.name end)
+    return out
+end
+
+function ns.ModuleOn(m)
+    local v = ns.Opt("module:" .. m.addon)
+    if v == nil then return m.default end
+    return v
+end
+
+function ns.ModuleLoaded(m) return IsLoaded and IsLoaded(m.addon) and true or false end
+
+local moduleLoader = CreateFrame("Frame")
+moduleLoader:RegisterEvent("PLAYER_LOGIN")
+moduleLoader:SetScript("OnEvent", function()
+    if not LoadModule then return end
+    for _, m in ipairs(ns.Modules()) do
+        if ns.ModuleOn(m) and not ns.ModuleLoaded(m) then
+            local ok, why = LoadModule(m.addon)
+            if not ok then
+                print(ns.PREFIX .. m.name .. " didn't load" .. (why == "DISABLED"
+                    and ": it's turned off in the game's AddOns list." or (why and (": " .. tostring(why)) or ".")))
+            end
+        end
+    end
+end)
 
 -- Each bar registers here so the options panel can show and hide it:
 -- { name, get = hidden?, set = function(hidden) }. Like Edit Mode's "Hide
@@ -159,6 +219,9 @@ end
 -- Per-layout settings for a piece: db.layouts[layout][key], with defaults
 ---------------------------------------------------------------------------
 function ns.Look(db, layoutName, key, defaults)
+    -- Edit Mode can ask before the saved settings have loaded: the defaults
+    -- for now (a fresh copy, so nothing's kept from it)
+    if not db then return CopyTable(defaults) end
     db.layouts = db.layouts or {}
     local lname = layoutName or "Default"
     db.layouts[lname] = db.layouts[lname] or {}
@@ -194,6 +257,8 @@ SlashCmdList.SPLIFFBARS = function(msg)
         ns.ToggleJournal()
     elseif (cmd == "" or cmd:lower() == "options") and ns.OpenOptions then
         ns.OpenOptions()
+    elseif cmd and cmd:lower() == "flight" and ns.TestFlight then
+        ns.TestFlight()
     elseif cmd and cmd:lower() == "loot" and ns.TestLoot then
         ns.TestLoot()
     elseif cmd and cmd:lower() == "mote" and ns.TestMote then
@@ -203,8 +268,50 @@ SlashCmdList.SPLIFFBARS = function(msg)
         print(ns.PREFIX .. "move and set up each piece in Edit Mode (Esc > Edit Mode): XP, Reputation, Gold, Weapon Skills, Trade Skills.")
         print(ns.PREFIX .. "/spliffbars journal (or /lj, or click the XP bar)  opens your Leveling Journal.")
         print(ns.PREFIX .. "/spliffbars goal 250  sets your gold goal.")
+        print(ns.PREFIX .. "/spliffbars flight  shows a 20 second test flight on the Flight Timer.")
         print(ns.PREFIX .. "/spliffbars mote  sends a test skill-up mote from your cursor.")
         print(ns.PREFIX .. "/spliffbars loot  sends test mined items from your cursor to your bag.")
         print(ns.PREFIX .. "/spliffbars recipe  sends a test learned-recipe swarm into your first trade bar.")
     end
 end
+
+---------------------------------------------------------------------------
+-- RXP Guides plays the minimap ping (sound 3175, its default) each time a
+-- mob your guide step wants turns up on a nameplate. Devon doesn't want it.
+-- RXP keeps a settings profile per character (RXPSettings.profiles), so
+-- at every login each profile still on that default gets "none", and the
+-- one in use now too. A sound picked there on purpose (not the ping) is
+-- left alone.
+---------------------------------------------------------------------------
+local PING = 3175
+local function QuietRXP()
+    local changed = false
+    local sv = type(RXPSettings) == "table" and RXPSettings
+    if sv and type(sv.profiles) == "table" then
+        for _, profile in pairs(sv.profiles) do
+            if type(profile) == "table" and (profile.soundOnFind == nil or profile.soundOnFind == PING) then
+                profile.soundOnFind = "none"
+                changed = true
+            end
+        end
+    end
+    -- the live one (the same table once RXP has made it, but not always yet)
+    local ace = LibStub and LibStub("AceAddon-3.0", true)
+    local ok, rxp = pcall(function() return ace and ace:GetAddon("RXPGuides", true) end)
+    local live = ok and rxp and rxp.settings and rxp.settings.profile
+    if type(live) == "table" and (live.soundOnFind == nil or live.soundOnFind == PING) then
+        live.soundOnFind = "none"
+        changed = true
+    end
+    if changed and SpliffbarsDB and not SpliffbarsDB.rxpPingOff then
+        SpliffbarsDB.rxpPingOff = true
+        print(ns.PREFIX .. "turned off RXP Guides' ping when a quest mob shows up (RXP options > Targeting > Play Sound).")
+    end
+end
+
+local quiet = CreateFrame("Frame")
+quiet:RegisterEvent("PLAYER_ENTERING_WORLD")
+quiet:SetScript("OnEvent", function()
+    QuietRXP()
+    C_Timer.After(5, QuietRXP) -- (RXP can set its profile up a moment later)
+end)

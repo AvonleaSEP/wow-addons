@@ -3,7 +3,7 @@
 ## Notes: Bars for the long haul: vertical XP and reputation with a timeline, a leveling journal of every level you've played, a gold goal bar, and weapon and trade skill bars. Each piece moves and sets up in Edit Mode.
 ## Author: Devon
 ## Version: 3.0
-## SavedVariables: XPRepBarsDB, SpliffbarsGoldDB, SpliffbarsSkillsDB, SpliffbarsDB
+## SavedVariables: XPRepBarsDB, SpliffbarsGoldDB, SpliffbarsSkillsDB, SpliffbarsDB, SpliffbarsFlightDB
 
 Libs\LibStub\LibStub.lua
 Libs\LibEditMode\embed.xml
@@ -15,5 +15,6 @@ Gold.lua
 Mote.lua
 Loot.lua
 Skills.lua
+Flight.lua
 QuestDrag.lua
 Options.lua

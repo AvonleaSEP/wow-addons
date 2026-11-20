@@ -7,8 +7,9 @@
 -- How it knows it's gathering: you cast Mining, Herb Gathering or Skinning
 -- just before the loot opened, or the game calls it fishing loot (a catch
 -- flies from the bobber you clicked).
--- From mobs and chests: coins fly into the Gold bar (which shines as they
--- land), quest items to the top of Questie's tracker, and green or better
+-- From mobs and chests: coins hop up out of the Gold bar and drop back in
+-- (Gold.lua; it shines once they land; with the bar hidden they fly to
+-- your bag), quest items to the top of Questie's tracker, and green or better
 -- items into your bag; the rest doesn't fly.
 -- /spliffbars loot tests it with a few items.
 
@@ -90,6 +91,9 @@ local function Send(p)
     if now - lastSent > 0.6 then flying = 0 end
     lastSent = now
     local gold = p.coins and GoldTarget()
+    -- coins: a few hop up out of the Gold bar and drop back in (Gold.lua)
+    -- rather than flying from your cursor
+    if gold and ns.GoldHop and ns.GoldHop(p.name) then return end
     local quest = p.quest and not gold and QuestTarget()
     ns.FlyItem(p.icon, p.quality, p.count, gold or quest or BagTarget(), flying * 0.35, p.name,
         gold and ns.GoldShine or nil)
@@ -162,6 +166,9 @@ ns.TestLoot = function()
         { icon = "Interface\\Icons\\INV_Ore_Copper_01", name = "Copper Ore", quality = 1, count = 2, gathered = true },
         { icon = "Interface\\Icons\\INV_Stone_02", name = "Rough Stone", quality = 1, count = 1, gathered = true },
         { icon = "Interface\\Icons\\INV_Misc_Gem_Emerald_03", name = "Malachite", quality = 2, count = 1, gathered = true },
+        -- and some coins, for the Gold bar's hop
+        { icon = "Interface\\Icons\\INV_Misc_Coin_02", coins = true, count = 1,
+            name = (SILVER_AMOUNT and COPPER_AMOUNT) and (SILVER_AMOUNT:format(12) .. " " .. COPPER_AMOUNT:format(34)) or nil },
     }
     for _, p in ipairs(tests) do Send(p) end
 end

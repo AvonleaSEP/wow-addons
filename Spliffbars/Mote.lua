@@ -78,6 +78,8 @@ local function Sparkle(x, y, r, g, b, size, life, dx, dy)
     s.anim:Play()
 end
 
+ns.Sparkle = Sparkle -- (the gold bar's coin hops use it too)
+
 ---------------------------------------------------------------------------
 -- Motes (pooled, so several skill-ups at once each get one)
 ---------------------------------------------------------------------------
@@ -108,11 +110,33 @@ local function Burst(m)
     end
 end
 
+-- Where a mote lands on a bar: the end farther from the screen's edge (the
+-- top of a bar standing along the bottom, the inner end of one lying
+-- along a side), and the way to come in from: (ox, oy) points out of that
+-- end, so the mote arrives travelling the other way, into the bar.
+local function LandingOf(frame)
+    local bar = frame.sb or frame -- (a skill bar's fill, not its icon)
+    local l, b, w, h = bar:GetRect()
+    if not l then return nil end
+    local k = bar:GetEffectiveScale() / UIScale()
+    l, b, w, h = l * k, b * k, w * k, h * k
+    local W, H = UIParent:GetWidth(), UIParent:GetHeight()
+    if h >= w then
+        local x = l + w / 2
+        if H - (b + h) >= b then return x, b + h, 0, 1 end -- the top: in from above
+        return x, b, 0, -1                                -- the bottom: in from below
+    end
+    local y = b + h / 2
+    -- lying down: from above and to that side, so it still drops in
+    if l >= W - (l + w) then return l, y, -0.55, 0.85 end
+    return l + w, y, 0.55, 0.85
+end
+
 local function Step(m, elapsed)
     m.t = m.t + elapsed / m.dur
-    -- the bar's centre now (in case it moved), else where it was
+    -- the landing spot now (in case the bar moved), else where it was
     if m.target then
-        local tx, ty = CenterOf(m.target)
+        local tx, ty = LandingOf(m.target)
         if tx then m.x2, m.y2 = tx, ty end
     end
     if m.t >= 1 then
@@ -476,7 +500,7 @@ function ns.SendSwarm(target, color, count, onEach, onAll, lift)
 end
 
 function ns.SendMote(target, color, onArrive, lift)
-    local x2, y2 = CenterOf(target)
+    local x2, y2, ox, oy = LandingOf(target)
     if not x2 then
         if onArrive then onArrive() end
         return
@@ -488,15 +512,14 @@ function ns.SendMote(target, color, onArrive, lift)
     m = m or NewMote()
     local x0, y0 = CursorPos()
     m.x0, m.y0, m.x2, m.y2, m.target = x0, y0, x2, y2, target
-    -- the bend: off to one side of the straight line, and lifted a little
+    -- an arc: up and over, then down into the end of the bar. The bend
+    -- point sits well out past that end (above it, for the top of a bar),
+    -- drawn a little toward where it started, so it arrives head-on.
     local dx, dy = x2 - x0, y2 - y0
     local dist = math.sqrt(dx * dx + dy * dy)
-    local side = (math.random() < 0.5) and -1 or 1
-    local bend = math.min(220, dist * 0.35) * side
-    local nx, ny = 0, 0
-    if dist > 0 then nx, ny = -dy / dist, dx / dist end
-    m.cx = (x0 + x2) / 2 + nx * bend
-    m.cy = (y0 + y2) / 2 + ny * bend + 60
+    local reach = 120 + dist * 0.3
+    m.cx = x2 + ox * reach + (x0 - x2) * 0.25
+    m.cy = math.max(y2 + oy * reach, (oy >= 0) and (y0 + 60) or -math.huge)
     m.dur = math.min(1.4, 0.7 + dist / 1800)
     m.r, m.g, m.b = Bright(color or { 1, 0.85, 0.4 }, lift or 0.55)
     m.halo:SetVertexColor(m.r, m.g, m.b)
