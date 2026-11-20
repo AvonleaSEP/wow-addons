@@ -1,0 +1,14 @@
+## Interface: 16001
+## Title: Spliff Hunter
+## Notes: Hunter tools for the Spliff package. A Spliffbars module: its page is in /spliffbars > Modules. Does nothing on other classes.
+## Author: Devon
+## Version: 0.1
+## Dependencies: Spliffbars
+## LoadOnDemand: 1
+## X-Spliff-Module: Hunter
+## X-Spliff-Default: on
+## SavedVariables: SpliffHunterDB
+
+Hunter.lua
+AutoShot.lua
+Pet.lua
