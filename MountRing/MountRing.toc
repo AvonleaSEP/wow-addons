@@ -1,0 +1,8 @@
+## Interface: 16001
+## Title: Mount Ring
+## Notes: A ring on your minimap showing 28 yards around you: anything inside it is closer than it's worth mounting for. Tap your Mount Ring key to toggle it, or hold it to peek. /mountring for options.
+## Author: Devon
+## Version: 1.0
+## SavedVariables: MountRingDB
+
+MountRing.lua

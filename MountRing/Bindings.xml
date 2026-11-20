@@ -1,0 +1,3 @@
+<Bindings>
+    <Binding name="MOUNTRING_TOGGLE" header="MOUNTRING" runOnUp="true">MountRing_Key(keystate)</Binding>
+</Bindings>
