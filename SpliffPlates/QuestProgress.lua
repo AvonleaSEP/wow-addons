@@ -1,4 +1,7 @@
--- Spliff Plates
+-- Spliff Plates: quest progress (Spliff's own addition to this copy of
+-- Threat Plates; see NOTICE.md). The plates themselves are Threat Plates'
+-- code, renamed; their own options: /splates.
+--
 -- Quest progress on nameplates: "3/8" just under the health bar, at its
 -- right end below the level, on each mob your quests need. Gold while
 -- there's more to do, a green tick once it's done. Only objectives in your
@@ -140,9 +143,22 @@ end
 ---------------------------------------------------------------------------
 -- The labels
 ---------------------------------------------------------------------------
-local enabled = true
+-- settings (SpliffPlatesDB; set on the Spliff Plates page in /spliffbars)
+local DEFAULTS = { enabled = true, size = 13, pos = "right" }
+local function Opt(k)
+    local db = SpliffPlatesDB
+    if type(db) == "table" and db[k] ~= nil then return db[k] end
+    return DEFAULTS[k]
+end
+local function SetOpt(k, v)
+    SpliffPlatesDB = SpliffPlatesDB or {}
+    SpliffPlatesDB[k] = v
+end
+
 local labels = {} -- unit token -> label frame
 local spare = {}
+local POINTS = { left = { "TOPLEFT", "BOTTOMLEFT", "LEFT" }, center = { "TOP", "BOTTOM", "CENTER" },
+    right = { "TOPRIGHT", "BOTTOMRIGHT", "RIGHT" } }
 
 local function GetLabel(unit, plate)
     local f = labels[unit]
@@ -151,23 +167,36 @@ local function GetLabel(unit, plate)
         if not f.text then
             f:EnableMouse(false)
             f.text = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-            f.text:SetPoint("TOPRIGHT")
-            f.text:SetJustifyH("RIGHT")
             f.text:SetShadowOffset(1, -1)
-            local font, size = f.text:GetFont()
-            if font then f.text:SetFont(font, (size or 12) + 1, "OUTLINE") end
+            f.font = f.text:GetFont()
         end
         labels[unit] = f
     end
+    local pts = POINTS[Opt("pos")] or POINTS.right
+    if f.font then f.text:SetFont(f.font, Opt("size"), "OUTLINE") end
+    f.text:ClearAllPoints()
+    f.text:SetPoint(pts[1])
+    f.text:SetJustifyH(pts[3])
     f:SetParent(plate)
     f:SetFrameStrata("HIGH")
     f:SetFrameLevel(10)
-    f:SetSize(40, 16)
+    f:SetSize(60, Opt("size") + 4)
     f:ClearAllPoints()
-    -- just under the health bar, at its right end (below the level)
-    local uf = plate.UnitFrame
-    local bar = uf and (uf.healthBar or uf.HealthBarsContainer or uf.HealthBar) or plate
-    f:SetPoint("TOPRIGHT", bar, "BOTTOMRIGHT", 0, -1)
+    -- just under the health bar, at its right end (below the level).
+    -- With Threat Plates the bar is its own: it hands it over through
+    -- plate.TPFrame:GetAnchor() (its health bar, or its name when the bar's
+    -- hidden, or the game's frame on plates it isn't drawing)
+    local bar
+    local tp = plate.TPFrame
+    if tp and tp.GetAnchor then
+        local ok, anchor = pcall(tp.GetAnchor, tp)
+        if ok and anchor then bar = anchor end
+    end
+    if not bar then
+        local uf = plate.UnitFrame
+        bar = uf and (uf.healthBar or uf.HealthBarsContainer or uf.HealthBar) or plate
+    end
+    f:SetPoint(pts[1], bar, pts[2], 0, -1)
     return f
 end
 
@@ -182,7 +211,7 @@ local function Release(unit)
 end
 
 local function UpdatePlate(unit)
-    if not enabled then Release(unit) return end
+    if not Opt("enabled") then Release(unit) return end
     local plate = C_NamePlate and C_NamePlate.GetNamePlateForUnit and C_NamePlate.GetNamePlateForUnit(unit)
     if not plate then Release(unit) return end
     local text, keep = ProgressFor(unit)
@@ -246,7 +275,7 @@ events:SetScript("OnUpdate", function(_, elapsed)
     tick = tick + elapsed
     if tick < 1 then return end
     tick = 0
-    if enabled then UpdateAll() end
+    if Opt("enabled") then UpdateAll() end
 end)
 
 -- /plates why: for your target, where its number comes from
@@ -281,7 +310,53 @@ end
 SLASH_SPLIFFPLATES1 = "/plates"
 SlashCmdList.SPLIFFPLATES = function(msg)
     if msg and msg:lower():match("^%s*why") then Why() return end
-    enabled = not enabled
-    if enabled then Soon() else for unit in pairs(labels) do Release(unit) end end
-    print(PREFIX .. "quest progress on nameplates " .. (enabled and "on." or "off."))
+    SetOpt("enabled", not Opt("enabled"))
+    if Opt("enabled") then Soon() else for unit in pairs(labels) do Release(unit) end end
+    print(PREFIX .. "quest progress on nameplates " .. (Opt("enabled") and "on." or "off."))
+end
+
+---------------------------------------------------------------------------
+-- Its page in Spliffbars' options (/spliffbars > Spliff Plates)
+---------------------------------------------------------------------------
+local function ShowAlways() -- the game's "Always Show Nameplates"
+    local v = GetCVarBool and GetCVarBool("nameplateShowAll")
+    return v and true or false
+end
+
+local function Redraw()
+    for unit in pairs(labels) do Release(unit) end -- (placed afresh with the new look)
+    if Opt("enabled") then Soon() end
+end
+
+if Spliffbars and Spliffbars.AddOptionsTab then
+    Spliffbars.AddOptionsTab("Spliff Plates",
+        "Your nameplates (a copy of Threat Plates), and quest progress on them: \"3/8\" under each mob your quests need.",
+        function(page)
+            local L = page:Column(16, -70)
+            page:Heading(L, "Quest Progress")
+            page:Check(L, "Show it on nameplates", function() return Opt("enabled") end,
+                function(v) SetOpt("enabled", v); Redraw() end)
+            local function on() return Opt("enabled") end
+            page:Choice(L, "Under the health bar, at the", { { "Left", "left" }, { "Centre", "center" }, { "Right", "right" } },
+                function() return Opt("pos") end, function(v) SetOpt("pos", v); Redraw() end, on)
+            page:Slider(L, "Text size", 8, 24, 1, function() return Opt("size") end,
+                function(v) SetOpt("size", v); Redraw() end, nil, on)
+
+            local R = page:Column(340, -70)
+            page:Heading(R, "Nameplates")
+            page:Check(R, "Always show nameplates", ShowAlways, function(v)
+                if InCombatLockdown() then print(PREFIX .. "that can only change out of combat.") return end
+                SetCVar("nameplateShowAll", v and "1" or "0")
+            end)
+            page:Note(R, "The game's own setting: without it, nameplates show only in combat.", 20)
+            page:Heading(R, "The Plates")
+            page:Note(R, "Their look, colours, threat and widgets have their own (large) options window.")
+            page:Button(R, "Open Plate Options", function()
+                if SlashCmdList and SlashCmdList.ACECONSOLE_SPLATES then
+                    SlashCmdList.ACECONSOLE_SPLATES("")
+                else
+                    print(PREFIX .. "type /splates for the plates' own options.")
+                end
+            end)
+        end)
 end
