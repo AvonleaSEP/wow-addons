@@ -7,6 +7,7 @@
 --   Ability ready             e.g. Overpower / Revenge, or any cooldown
 --   Tracking off              e.g. Find Minerals / Find Herbs
 --   Target in range           e.g. Throw: your target is in throwing range
+--   I'm stunned               e.g. Will to Survive: you're stunned and it's ready
 --
 -- Each cue has its own spells, when it shows (in combat, out of combat,
 -- always), look (steady, pulse, flash), size, brightness and spot. Cues
@@ -32,18 +33,26 @@ local FALLBACK_ICONS = {
     ["Find Herbs"]    = "Interface\\Icons\\INV_Misc_Flower_02",
     ["Oath of Light"] = "Interface\\Icons\\Spell_Holy_HolyBolt",
     ["Throw"]         = "Interface\\Icons\\Ability_Throw",
+    ["Will to Survive"] = "Interface\\Icons\\INV_Jewelry_TrinketPVP_01",
 }
+
+-- Will to Survive under the cursor, pulsing, while you're stunned and it's
+-- off cooldown (added once to existing lists too, at the top so it wins)
+local STUN_CUE = { name = "Will to Survive", type = "stunned", spells = "Will to Survive",
+    when = "always", style = "pulse", x = 0, y = -40, size = 34, alpha = 1 }
 
 -- The throwing knife at your cursor while your target is in throwing range
 -- (added once to existing lists too; see OnLoaded)
--- It sits on the pointer itself (over the arrow, which points up-left from
--- its tip): the "On the pointer" spot.
-local POINTER_X, POINTER_Y = 12, -12
+-- It sits as a tiny icon just up-left of the arrow's tip, clear of the
+-- arrow itself: the "Tip top-left" spot.
+local POINTER_X, POINTER_Y = 12, -12 -- "On the pointer": over the arrow
+local TIP_X, TIP_Y, TIP_SIZE = -10, 10, 16 -- "Tip top-left"
 local THROW_CUE = { name = "Throw range", type = "range", spells = "Throw",
-    when = "always", style = "steady", x = POINTER_X, y = POINTER_Y, size = 32, alpha = 1 }
+    when = "always", style = "steady", x = TIP_X, y = TIP_Y, size = TIP_SIZE, alpha = 1 }
 
 -- The starting list (your cues from before the settings window).
 local DEFAULT_CUES = {
+    STUN_CUE,
     { name = "Overpower / Revenge", type = "ready", spells = "Overpower, Revenge",
       when = "always", style = "pulse", x = 0, y = 32, size = 36, alpha = 1,
       needTarget = true, hiddenCooldownOK = true },
@@ -152,6 +161,44 @@ local function InRange(name)
     if not ok or isSecret(r) then return nil end
     if r == true or r == 1 then return true end
     if r == false or r == 0 then return false end
+    return nil
+end
+
+-- Are you stunned? true / false, or nil when the game won't say. Reads the
+-- game's loss-of-control list (what drives its big "Stunned" alert). If the
+-- list is there but its kinds are hidden, "you don't have full control"
+-- stands in (that's also true when feared or charmed).
+local STUN_KINDS = { STUN = true, STUN_MECHANIC = true }
+local function Stunned()
+    local LoC = C_LossOfControl
+    if LoC then
+        local countFn = LoC.GetActiveLossOfControlDataCount or LoC.GetNumEvents
+        local dataFn = LoC.GetActiveLossOfControlData or LoC.GetEventInfo
+        if countFn and dataFn then
+            local ok, n = pcall(countFn)
+            if ok and Num(n) then
+                if n == 0 then return false end
+                local hidden = false
+                for i = 1, n do
+                    local ok2, d = pcall(dataFn, i)
+                    local kind
+                    if ok2 and not isSecret(d) then
+                        if type(d) == "table" then kind = d.locType else kind = d end
+                    end
+                    if kind == nil or isSecret(kind) then
+                        hidden = true
+                    elseif STUN_KINDS[kind] then
+                        return true
+                    end
+                end
+                if not hidden then return false end
+            end
+        end
+    end
+    if HasFullControl then
+        local ok, full = pcall(HasFullControl)
+        if ok and not isSecret(full) then return not full end
+    end
     return nil
 end
 
@@ -417,6 +464,14 @@ local function Evaluate(cue, snap)
         end
         if missing then return true, missing end
         return false
+    elseif t == "stunned" then
+        -- the first spell you know that's off cooldown (a hidden cooldown
+        -- still shows: better a cue you can't use than a stun you sit in)
+        if onTaxi or not WhenOK(cue) or Stunned() ~= true then return false end
+        for _, name in ipairs(Spells(cue)) do
+            if PlayerKnows(name) and OnCooldown(name) ~= true then return true, name end
+        end
+        return false
     end
     return false
 end
@@ -574,6 +629,11 @@ driver:RegisterUnitEvent("UNIT_SPELLCAST_SUCCEEDED", "player")
 -- not every client has these; registering a missing event is an error
 pcall(driver.RegisterEvent, driver, "SPELL_ACTIVATION_OVERLAY_GLOW_SHOW")
 pcall(driver.RegisterEvent, driver, "SPELL_ACTIVATION_OVERLAY_GLOW_HIDE")
+-- a stun shows the moment it lands, not on the next tick
+pcall(driver.RegisterEvent, driver, "LOSS_OF_CONTROL_ADDED")
+pcall(driver.RegisterEvent, driver, "LOSS_OF_CONTROL_UPDATE")
+pcall(driver.RegisterEvent, driver, "PLAYER_CONTROL_LOST")
+pcall(driver.RegisterEvent, driver, "PLAYER_CONTROL_GAINED")
 
 local OnLoaded -- set up below (settings window)
 
@@ -610,6 +670,29 @@ driver:SetScript("OnEvent", function(_, event, ...)
                 end
             end
         end
+        -- once: the throw cue shrinks to a tiny icon up-left of the tip
+        if not DB.throwCueAtTip then
+            DB.throwCueAtTip = true
+            for _, cue in ipairs(DB.cues) do
+                if cue.type == "range" and cue.x == POINTER_X and cue.y == POINTER_Y then
+                    cue.x, cue.y, cue.size = TIP_X, TIP_Y, TIP_SIZE
+                end
+            end
+        end
+        -- once: add the stun cue (Will to Survive) at the top of an existing list
+        if not DB.stunCueAdded then
+            DB.stunCueAdded = true
+            local have = false
+            for _, cue in ipairs(DB.cues) do
+                if cue.type == "stunned" then have = true end
+            end
+            if not have then
+                local cue = CopyTable(STUN_CUE)
+                cue.enabled = true
+                table.insert(DB.cues, 1, cue)
+                while #DB.cues > MAX_CUES do table.remove(DB.cues) end
+            end
+        end
         if DB.preview == nil then DB.preview = true end
         driver:UnregisterEvent("ADDON_LOADED")
         if OnLoaded then OnLoaded() end
@@ -620,6 +703,8 @@ driver:SetScript("OnEvent", function(_, event, ...)
             glowing[name] = (event == "SPELL_ACTIVATION_OVERLAY_GLOW_SHOW") or nil
             Refresh()
         end
+    elseif event:find("^LOSS_OF_CONTROL") or event:find("^PLAYER_CONTROL") then
+        Refresh()
     elseif event == "PLAYER_REGEN_ENABLED" then
         wipe(glowing) -- never leave a glow stuck on after a fight
         Refresh()
@@ -656,13 +741,14 @@ local TYPES = {
     { "ready", "Ability ready" },
     { "tracking", "Tracking off" },
     { "range", "Target in range" },
+    { "stunned", "I'm stunned" },
 }
 local WHENS = { { "combat", "In combat" }, { "nocombat", "Out of combat" }, { "always", "Always" } }
 local STYLES = { { "steady", "Steady" }, { "pulse", "Pulse" }, { "flash", "Flash every few sec" } }
 local SPOTS = {
     { "Above", 0, 32 }, { "Below", 0, -40 }, { "Left", -40, 0 }, { "Right", 40, 0 },
     { "Top-left", -32, 32 }, { "Top-right", 32, 32 }, { "Bottom-left", -32, -32 }, { "Bottom-right", 32, -32 },
-    { "On the pointer", POINTER_X, POINTER_Y },
+    { "On the pointer", POINTER_X, POINTER_Y }, { "Tip top-left", TIP_X, TIP_Y },
 }
 local SPELL_LABELS = {
     buff = "Spell you cast for it (sets its icon and timer; blank if none)",
@@ -670,6 +756,7 @@ local SPELL_LABELS = {
     ready = "Abilities (commas between; the first one ready shows)",
     tracking = "Tracking spells (commas between)",
     range = "Spells to check range with (commas between; the first in range shows)",
+    stunned = "Spells that break a stun (commas between; the first one ready shows)",
 }
 
 local win, selected
@@ -905,7 +992,8 @@ local function BuildWindow()
         if not selected then return end
         if not lastCast then print(PREFIX .. "cast the spell once, then click this.") return end
         local l = Spells(selected)
-        if selected.type == "ready" or selected.type == "tracking" or selected.type == "range" then
+        if selected.type == "ready" or selected.type == "tracking" or selected.type == "range"
+            or selected.type == "stunned" then
             local copy = {}
             for _, s in ipairs(l) do copy[#copy + 1] = s end
             copy[#copy + 1] = lastCast
@@ -938,7 +1026,7 @@ local function BuildWindow()
     W.styleLabel = Text(win, "Look"); Place(W.styleLabel, X2, -244)
     W.style = Cycle(win, 190, STYLES, Set("style")); Place(W.style, X2, -258)
 
-    W.size = Slider(win, "Size", 16, 64, 1, function(v) return math.floor(v + 0.5) .. " px" end,
+    W.size = Slider(win, "Size", 12, 64, 1, function(v) return math.floor(v + 0.5) .. " px" end,
         function(v) if selected then selected.size = math.floor(v + 0.5); Changed(selected) end end)
     Place(W.size, X, -288)
     W.alpha = Slider(win, "Brightness", 0.2, 1, 0.05, function(v) return math.floor(v * 100 + 0.5) .. "%" end,
