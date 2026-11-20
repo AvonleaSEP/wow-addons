@@ -1,7 +1,8 @@
 ## Interface: 16001
 ## Title: MacroBook
-## Notes: Keeps the macros listed in MacroBook.lua in your account macros.
+## Notes: Keeps each class's macros from MacroBook.lua in that character's own macros (warrior now, hunter ready to fill). Spliff-Rite's old account macros move into its own on its next login. /macrobook move moves your account macros to this character.
 ## Author: Devon
 ## Version: 1.0
+## SavedVariables: MacroBookDB
 
 MacroBook.lua
