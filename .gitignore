@@ -3,3 +3,6 @@ updater/addons-path.txt
 dist/
 .DS_Store
 Thumbs.db
+
+# biggest hits found in the combat log (tools/biggest-hits.js); per computer
+DamageBar/Hits.lua

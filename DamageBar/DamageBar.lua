@@ -250,26 +250,148 @@ end
 
 ---------------------------------------------------------------------------
 -- Single hits: the biggest one number today and ever, and a high score per
--- ability. The source is the game's "your target took N damage" notice
--- (UNIT_COMBAT on your target, what puts hit numbers on portraits); the
--- ability is the one you cast just before the hit, else Auto Attack.
--- Solo only: in a group other players' hits land on your target too.
--- Whether this client lets addons read those numbers isn't known yet (the
--- game's docs mark them hidden); the log notes it on the first hit
--- ("target hit amount: plain / secret"). Until hits arrive, the box keeps
--- showing the best ability in one fight.
+-- ability. Two sources: the game's Combat Log chat tab (below NoteHit),
+-- and the "your target took N damage" notice (UNIT_COMBAT on your target;
+-- solo only, the ability taken as the one you cast just before). The
+-- notice's numbers are hidden on this client (the log said "target hit
+-- amount: secret" at every login, 18-19 Nov), so the tab is the one that
+-- can work. The box shows "-" until a hit is read.
 -- DB.hitDay / DB.hitEver = { amount, spell, when }; DB.hitScores[spell] = { amount, when }
 ---------------------------------------------------------------------------
 local lastCast -- { name, at }: your latest spell, to name the next hit
 
-local function NoteHit(amount, spell)
-    local today = date("%Y-%m-%d")
+local function NoteHit(amount, spell, crit, day)
+    local today = day or date("%Y-%m-%d")
+    if day and day ~= date("%Y-%m-%d") then
+        -- (another day's: only the all-time records)
+        local rec = { amount = amount, spell = spell, crit = crit or nil, when = day }
+        if not DB.hitEver or amount > DB.hitEver.amount then DB.hitEver = rec end
+        DB.hitScores = DB.hitScores or {}
+        local s = DB.hitScores[spell]
+        if not s or amount > s.amount then DB.hitScores[spell] = { amount = amount, crit = crit or nil, when = day } end
+        return
+    end
+    local rec = { amount = amount, spell = spell, crit = crit or nil, when = today }
     if not DB.hitDay or DB.hitDay.when ~= today then DB.hitDay = { amount = 0, when = today } end
-    if amount > DB.hitDay.amount then DB.hitDay = { amount = amount, spell = spell, when = today } end
-    if not DB.hitEver or amount > DB.hitEver.amount then DB.hitEver = { amount = amount, spell = spell, when = today } end
+    if amount > DB.hitDay.amount then DB.hitDay = rec end
+    if not DB.hitEver or amount > DB.hitEver.amount then DB.hitEver = CopyTable(rec) end
     DB.hitScores = DB.hitScores or {}
     local s = DB.hitScores[spell]
-    if not s or amount > s.amount then DB.hitScores[spell] = { amount = amount, when = today } end
+    if not s or amount > s.amount then DB.hitScores[spell] = { amount = amount, crit = crit or nil, when = today } end
+end
+
+---------------------------------------------------------------------------
+-- Single hits from the game's Combat Log chat tab. Its lines are written by
+-- the game's own combat log ("Your Mortal Strike hit Kobold Vermin 245
+-- Physical. (Critical)", "You hit Kobold Vermin 31 Physical."), so they may
+-- carry the real number even where the hit notices hide it. Only lines
+-- starting "Your" / "You" are yours, so group members' hits never count.
+-- The log notes once whether the lines read ("combat log lines: plain /
+-- secret") and keeps the first few as samples, to check the reading.
+---------------------------------------------------------------------------
+-- (longest first, so "critically hits" wins over "hits")
+local HIT_VERBS = { "critically hits", "critically hit", "crits", "crit", "hits", "hit" }
+local logKinds, samples = {}, 0
+local UpdateHitBoxSoon -- UpdateHitBox, made with the bar below
+
+local function Clean(text)
+    return (text:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", ""):gsub("|H.-|h(.-)|h", "%1"):gsub("|T.-|t", ""))
+end
+
+local function ToNumber(s)
+    return s and tonumber((s:gsub(",", ""):gsub("%.", ""))) or nil
+end
+
+-- the amount, the ability and whether it was a crit, or nil for any other line
+-- your name, in the forms the log can use instead of "Your" / "You"
+local function MyNames()
+    local first, second = UnitName("player")
+    local names = {}
+    if type(first) == "string" and not isSecret(first) then
+        if type(second) == "string" and not isSecret(second) and second ~= "" then
+            names[#names + 1] = first .. " " .. second
+            names[#names + 1] = first .. "-" .. second
+        end
+        names[#names + 1] = first
+    end
+    return names
+end
+
+-- the line as "Your ..." / "You ..." when it's about you: anything before
+-- the first letter goes (a date and time, "[12:34:56] ", "> "), and your
+-- name becomes Your / You ("Spliff Rite's Mortal Strike hits ...")
+local function Normalize(line)
+    line = line:gsub("^[^%a]+", "")
+    for _, n in ipairs(MyNames()) do
+        if line:sub(1, #n + 3) == n .. "'s " then return "Your " .. line:sub(#n + 4) end
+        if line:sub(1, #n + 1) == n .. " " then return "You " .. line:sub(#n + 2) end
+    end
+    return line
+end
+
+local function ParseHit(line)
+    line = Normalize(line)
+    local spell, verb, rest
+    local body = line:match("^Your (.+)$")
+    if body then
+        -- the ability is everything before the first hit word
+        for _, v in ipairs(HIT_VERBS) do
+            local s, r = body:match("^(.-) " .. v .. " (.+)$")
+            if s and s ~= "" and (not spell or #s < #spell) then spell, verb, rest = s, v, r end
+        end
+    else
+        body = line:match("^You (.+)$")
+        if not body then return nil end
+        for _, v in ipairs(HIT_VERBS) do
+            local r = body:match("^" .. v .. " (.+)$")
+            if r then spell, verb, rest = "Auto Attack", v, r break end
+        end
+    end
+    if not verb then return nil end
+    -- the number after "for", else the first number after the target's name
+    local amount = ToNumber(rest:match("for ([%d,%.]+)")) or ToNumber(rest:match("([%d,%.]+)"))
+    if not amount or amount <= 0 then return nil end
+    local crit = verb:lower():find("^crit") ~= nil or line:find("Critical") ~= nil
+    return amount, spell, crit
+end
+
+local function OnLogLine(text)
+    if not DB then return end
+    local kind = isSecret(text) and "secret" or type(text)
+    if not logKinds[kind] then
+        logKinds[kind] = true
+        DebugAdd("combat log lines: " .. (kind == "string" and "plain" or kind))
+    end
+    if kind ~= "string" then return end
+    local line = Clean(text)
+    local amount, spell, crit = ParseHit(line)
+    -- the first lines of each session, exactly as they came (to check the
+    -- reading against)
+    if samples < 15 then
+        samples = samples + 1
+        DebugAdd("log sample: " .. line:sub(1, 140) .. (amount and ("  -> " .. amount .. " " .. spell) or "  -> skipped"))
+    end
+    if amount then
+        NoteHit(amount, spell, crit)
+        if UpdateHitBoxSoon then UpdateHitBoxSoon() end
+    end
+end
+
+-- the Combat Log tab: whichever chat window the game's combat log writes to
+local function HookCombatLog()
+    local frame = _G.COMBATLOG
+    if not frame then
+        for i = 1, (NUM_CHAT_WINDOWS or 10) do
+            local name = GetChatWindowInfo and GetChatWindowInfo(i)
+            if name == (COMBAT_LOG or "Combat Log") then frame = _G["ChatFrame" .. i] end
+        end
+    end
+    frame = frame or _G.ChatFrame2
+    if not frame or frame.damageBarHooked then return frame ~= nil end
+    frame.damageBarHooked = true
+    hooksecurefunc(frame, "AddMessage", function(_, text) pcall(OnLogLine, text) end)
+    DebugAdd("watching the combat log tab (" .. (frame:GetName() or "?") .. ")")
+    return true
 end
 
 local function HitToday()
@@ -282,6 +404,8 @@ end
 local layoutName
 
 local function Look()
+    -- Edit Mode can ask before the saved settings have loaded: the defaults for now
+    if not DB then return CopyTable(LAYOUT_DEFAULTS) end
     DB.layouts = DB.layouts or {}
     local key = layoutName or "Default"
     local l = DB.layouts[key]
@@ -316,8 +440,8 @@ back:SetColorTexture(0.08, 0.08, 0.1, 0.75)
 local emptyText = inner:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
 emptyText:SetPoint("CENTER")
 
--- The best-of-the-day box at the left end: the most one ability did in one
--- fight today ("Best-in-a-Fight Section" / "Width %"); the split fills the rest.
+-- The biggest-hit box at the left end: today's biggest single hit
+-- ("Biggest Hit Section" / "Width %"); the split fills the rest.
 local hitBox = CreateFrame("Frame", nil, inner)
 hitBox:SetPoint("TOPLEFT")
 hitBox:SetPoint("BOTTOMLEFT")
@@ -357,11 +481,11 @@ local function UpdateHitBox()
     hitBox:SetWidth(w)
     ApplyFont(hitText, Look(), Look().labelSize)
     hitText:SetWidth(w - 2)
-    -- today's biggest single hit once hits come through; else the best
-    -- ability in one fight
-    local b = (DB and DB.hitEver) and HitToday() or (not (DB and DB.hitEver) and BestToday()) or nil
+    -- today's biggest single hit (one swing or one cast), "-" until there is one
+    local b = HitToday()
     hitText:SetText(b and HitShort(b.amount) or "-")
 end
+UpdateHitBoxSoon = UpdateHitBox
 
 local segs = {}
 local function Seg(i)
@@ -640,33 +764,36 @@ bar:SetScript("OnEnter", function(self)
         if label == "Best ability, ever" and b.when then what = what .. "  (" .. b.when .. ")" end
         GameTooltip:AddDoubleLine(label, what, 1, 0.82, 0, 1, 1, 1)
     end
-    if DB and DB.hitEver then
-        -- single hits come through: the biggest ones and each ability's high score
-        local function HitLine(label, h)
-            if not h then
-                GameTooltip:AddDoubleLine(label, "none yet", 1, 0.82, 0, 0.6, 0.6, 0.6)
-                return
-            end
-            GameTooltip:AddDoubleLine(label, Short(h.amount) .. "  " .. (h.spell or ""), 1, 0.82, 0, 1, 1, 1)
+    -- single hits: one swing or one cast, the biggest today and ever, and
+    -- each ability's high score
+    local function HitLine(label, h)
+        if not h then
+            GameTooltip:AddDoubleLine(label, "none yet", 1, 0.82, 0, 0.6, 0.6, 0.6)
+            return
         end
-        HitLine("Biggest hit today", HitToday())
-        HitLine("Biggest hit ever", DB.hitEver)
-        local scores = {}
-        for spell, s in pairs(DB.hitScores or {}) do scores[#scores + 1] = { spell = spell, s = s } end
-        table.sort(scores, function(a, b) return a.s.amount > b.s.amount end)
-        if #scores > 0 then
-            GameTooltip:AddLine(" ")
-            GameTooltip:AddLine("High scores", 1, 0.82, 0)
-            for i = 1, math.min(#scores, 8) do
-                local x = scores[i]
-                GameTooltip:AddDoubleLine("   " .. x.spell, Short(x.s.amount) .. "  (" .. x.s.when .. ")",
-                    1, 1, 1, 1, 1, 1)
-            end
-        end
-    else
-        BestLine("Best ability in one fight, today", today)
-        BestLine("Best ability, ever", ever)
+        GameTooltip:AddDoubleLine(label, Short(h.amount) .. "  " .. (h.spell or "") .. (h.crit and "  (crit)" or ""),
+            1, 0.82, 0, 1, 1, 1)
     end
+    HitLine("Biggest hit today", HitToday())
+    HitLine("Biggest hit ever", DB and DB.hitEver)
+    local scores = {}
+    for spell, s in pairs(DB and DB.hitScores or {}) do scores[#scores + 1] = { spell = spell, s = s } end
+    table.sort(scores, function(a, b) return a.s.amount > b.s.amount end)
+    if #scores > 0 then
+        GameTooltip:AddLine(" ")
+        GameTooltip:AddLine("Biggest hit per ability", 1, 0.82, 0)
+        for i = 1, math.min(#scores, 8) do
+            local x = scores[i]
+            GameTooltip:AddDoubleLine("   " .. x.spell, Short(x.s.amount) .. (x.s.crit and " crit" or "")
+                .. "  (" .. x.s.when .. ")", 1, 1, 1, 1, 1, 1)
+        end
+    elseif not (DB and DB.hitEver) then
+        GameTooltip:AddLine("Single hits are read from your Combat Log chat tab; keep it (it can be hidden).",
+            0.6, 0.6, 0.6, true)
+    end
+    GameTooltip:AddLine(" ")
+    BestLine("Most by one ability in a fight, today", today)
+    BestLine("Best ability, ever", ever)
     GameTooltip:AddLine(" ")
     if shown and shown.total > 0 then
         for _, e in ipairs(shown.entries) do
@@ -783,7 +910,7 @@ LEM:AddFrameSettings(bar, {
         { text = "Off", value = "off" },
     } }),
     Setting(LEM.SettingType.Checkbox, "Hide When Empty", "hideEmpty"),
-    Setting(LEM.SettingType.Checkbox, "Best-in-a-Fight Section", "hitSection", {
+    Setting(LEM.SettingType.Checkbox, "Biggest Hit Section", "hitSection", {
         set = function(layout, value)
             layoutName = layout
             Look().hitSection = value
@@ -791,7 +918,7 @@ LEM:AddFrameSettings(bar, {
             pcall(LEM.RefreshFrameSettings, LEM, bar) -- greys the width slider in and out
         end,
     }),
-    Setting(LEM.SettingType.Slider, "Best-in-a-Fight Width %", "hitPct", {
+    Setting(LEM.SettingType.Slider, "Biggest Hit Width %", "hitPct", {
         minValue = 5, maxValue = 30, valueStep = 1,
         formatter = function(v) return math.floor(v + 0.5) .. "%" end,
         disabled = function() return not (DB and Look().hitSection) end,
@@ -829,7 +956,16 @@ LEM:RegisterCallback("exit", Refresh)
 
 SLASH_DAMAGEBAR1 = "/dbar"
 SlashCmdList.DAMAGEBAR = function(msg)
-    if (msg or ""):lower():match("reset") then
+    local m = (msg or ""):lower()
+    if m:match("^%s*log off") then
+        DB.logCombat = false
+        if LoggingCombat then pcall(LoggingCombat, false) end
+        print("|cffc79c6eDamage Bar|r combat log file off (and not switched on at login).")
+    elseif m:match("^%s*log") then
+        DB.logCombat = true
+        if LoggingCombat then pcall(LoggingCombat, true) end
+        print("|cffc79c6eDamage Bar|r combat log file on (Logs\\WoWCombatLog-*.txt), and at every login.")
+    elseif m:match("reset") then
         ResetNow()
     else
         print("|cffc79c6eDamage Bar|r right-click the bar or /dbar reset to clear it. Move and size it in Edit Mode.")
@@ -886,6 +1022,7 @@ bar:SetScript("OnEvent", function(_, event, arg1, arg2, arg3, arg4)
         return
     end
     if event == "ADDON_LOADED" then
+        if arg1 == "Blizzard_CombatLog" then HookCombatLog() return end
         if arg1 ~= "DamageBar" then return end
         DamageBarDB = DamageBarDB or {}
         DB = DamageBarDB
@@ -897,7 +1034,15 @@ bar:SetScript("OnEvent", function(_, event, arg1, arg2, arg3, arg4)
             DB.version = 2
         end
         if not DEBUG_LOG then DB.debug = nil else DebugAdd("---- loaded, meter=" .. tostring(meter ~= nil)) end
-        bar:UnregisterEvent("ADDON_LOADED")
+        -- single hits found in the combat log file by tools\biggest-hits.js
+        -- (Hits.lua, loaded with the addon)
+        local found = type(DamageBarHits) == "table" and DamageBarHits
+        if found and type(found.hits) == "table" and type(found.day) == "string" then
+            for spell, h in pairs(found.hits) do
+                if type(h) == "table" and type(h.amount) == "number" then NoteHit(h.amount, spell, h.crit, found.day) end
+            end
+        end
+        -- (ADDON_LOADED stays on: the game's combat log can load after this)
     elseif event == "PLAYER_ENTERING_WORLD" then
         local isInitialLogin = arg1
         if isInitialLogin then
@@ -906,6 +1051,14 @@ bar:SetScript("OnEvent", function(_, event, arg1, arg2, arg3, arg4)
             if ResetMode() == "login" then AutoReset("new login") end
         end
         inCombat = InCombatLockdown()
+        if not HookCombatLog() then C_Timer.After(3, HookCombatLog) end
+        -- the game's combat log file (Logs\WoWCombatLog-*.txt): the only
+        -- place your single hits are written down on this client, so it's
+        -- switched on at every login (/dbar log off stops that)
+        if DB.logCombat ~= false and LoggingCombat then
+            local ok, on = pcall(LoggingCombat)
+            if ok and not on then pcall(LoggingCombat, true) end
+        end
         NoteOutFloor() -- stored fights that load later are caught by the tick
         Place()
         Refresh()

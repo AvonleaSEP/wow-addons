@@ -1,6 +1,6 @@
 ## Interface: 16001
 ## Title: Damage Bar
-## Notes: Your best ability-in-one-fight today, then one bar split by how much damage each ability did. Resets how you choose (or never). Move and size it in Edit Mode.
+## Notes: Your biggest single hit today (read from the combat log by toolsbiggest-hits.js), then one bar split by how much damage each ability did. Resets how you choose (or never). Move and size it in Edit Mode.
 ## Author: Devon
 ## Version: 1.5
 ## SavedVariables: DamageBarDB
@@ -9,3 +9,4 @@ Libs\LibStub\LibStub.lua
 Libs\LibEditMode\embed.xml
 
 DamageBar.lua
+Hits.lua
