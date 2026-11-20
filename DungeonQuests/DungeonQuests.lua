@@ -526,6 +526,12 @@ end)
 
 SLASH_DUNGEONQUESTS1 = "/dq"
 SLASH_DUNGEONQUESTS2 = "/dungeonquests"
-SlashCmdList.DUNGEONQUESTS = function()
+SlashCmdList.DUNGEONQUESTS = function(msg)
+    -- /dq resets: which dungeons aren't reset (Resets.lua); /dq resets clear
+    local cmd, rest = (msg or ""):lower():match("^%s*(%S*)%s*(.-)%s*$")
+    if cmd == "resets" and DungeonQuests_Resets then
+        DungeonQuests_Resets(rest == "clear")
+        return
+    end
     if win:IsShown() then win:Hide() else Open() end
 end

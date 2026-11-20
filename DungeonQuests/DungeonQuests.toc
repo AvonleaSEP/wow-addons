@@ -7,3 +7,4 @@
 ## SavedVariables: DungeonQuestsDB
 
 DungeonQuests.lua
+Resets.lua
