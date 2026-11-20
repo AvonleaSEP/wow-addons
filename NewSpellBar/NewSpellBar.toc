@@ -1,0 +1,8 @@
+## Interface: 16001
+## Title: New Spell Bar
+## Notes: Puts each spell you learn on Action Bar 5 (the first empty button), so new skills are ready to use. /newspells for options.
+## Author: Devon
+## Version: 1.0
+## SavedVariables: NewSpellBarDB
+
+NewSpellBar.lua
