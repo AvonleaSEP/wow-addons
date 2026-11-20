@@ -1,0 +1,13 @@
+## Interface: 16001
+## Title: Spliff Frames
+## Notes: Unit frames for the Spliff package. A Spliffbars module: switch it on in Spliffbars' options (Modules).
+## Author: Devon
+## Version: 0.1
+## Dependencies: Spliffbars
+## LoadOnDemand: 1
+## X-Spliff-Module: Unit Frames
+## X-Spliff-Default: off
+## SavedVariables: SpliffFramesDB
+
+Frames.lua
+Stance.lua
