@@ -1,6 +1,13 @@
 -- Hunt Target
--- A small text box: type up to 3 mob names, separated by commas, and press
--- Enter. Then the Hunt key (Options > Keybindings > AddOns > Hunt Target >
+-- A slim plate, like a nameplate: a skull, the mobs you're hunting, and Tab
+-- Mark's next mark. Click it and type up to 3 mob names, separated by
+-- commas, then press Enter (Esc undoes). Hover it for the list; an X on
+-- each name removes it.
+-- When a hunted mob is your target, or has a nameplate near you, a little
+-- unit frame pops up above the plate: portrait, raid mark, level, name,
+-- health, and TARGET / NEARBY / DEAD (with a ping when one turns up nearby).
+-- Click that frame to target the mob; Shift+click it to do the Hunt key.
+-- Then the Hunt key (Options > Keybindings > AddOns > Hunt Target >
 -- "Hunt: target, mark and use your ability") does, each press:
 --   * keeps your current target if it's alive and hostile; otherwise
 --   * targets the nearest mob of the first name, or if none is around the
@@ -26,7 +33,8 @@
 -- mid-fight are saved when the fight ends.
 --
 -- Also: /hunt <names> sets them from chat, /hunt alone shows the current ones.
--- Edit Mode (Esc > Edit Mode): drag the box, click it for Width.
+-- Edit Mode (Esc > Edit Mode): drag the plate, click it for Width, the
+-- Ability, and whether the found mob (and its sound) shows.
 -- Edit Mode support comes from LibEditMode by p3lim (Libs\LibEditMode).
 
 local MAX_MOBS = 3
@@ -270,33 +278,156 @@ local function SetMobs(list, verbose)
 end
 
 ---------------------------------------------------------------------------
--- The box
+-- The plate: a slim bar like a nameplate. A skull, the names you're
+-- hunting, and Tab Mark's next mark on the right. Click it to type names;
+-- Enter saves, Esc undoes. Hover it for the list (an X on each name
+-- removes it).
 ---------------------------------------------------------------------------
+local PLATE_H = 20
+local isSecret = issecretvalue or function() return false end
+
+local function Flat(parent, layer, sub, r, g, b, a)
+    local t = parent:CreateTexture(nil, layer, nil, sub)
+    t:SetColorTexture(r, g, b, a)
+    return t
+end
+
+-- a vertical fade from (top) to (bottom) alpha of white
+local function Sheen(t, top, bottom)
+    t:SetColorTexture(1, 1, 1, 1)
+    if t.SetGradient and CreateColor then
+        t:SetGradient("VERTICAL", CreateColor(1, 1, 1, bottom), CreateColor(1, 1, 1, top))
+    elseif t.SetGradientAlpha then
+        t:SetGradientAlpha("VERTICAL", 1, 1, 1, bottom, 1, 1, 1, top)
+    else
+        t:SetAlpha(top)
+    end
+end
+
+-- a dark plate with a 1px black edge and a soft shine on its top half
+local function Plate(f, h)
+    local edge = Flat(f, "BACKGROUND", 0, 0, 0, 0, 0.9)
+    edge:SetAllPoints()
+    f.fill = Flat(f, "BACKGROUND", 1, 0.07, 0.07, 0.09, 0.92)
+    f.fill:SetPoint("TOPLEFT", 1, -1)
+    f.fill:SetPoint("BOTTOMRIGHT", -1, 1)
+    local shine = f:CreateTexture(nil, "BORDER")
+    shine:SetPoint("TOPLEFT", 1, -1)
+    shine:SetPoint("TOPRIGHT", -1, -1)
+    shine:SetHeight(math.floor(h / 2))
+    Sheen(shine, 0.07, 0)
+end
+
 local holder = CreateFrame("Frame", "HuntTargetFrame", UIParent)
 holder.editModeName = "Hunt Target"
-holder:SetSize(LAYOUT_DEFAULTS.width, 36)
+holder:SetSize(LAYOUT_DEFAULTS.width, PLATE_H)
 holder:SetClampedToScreen(true)
+holder:EnableMouse(true)
+Plate(holder, PLATE_H)
 
-local title = holder:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-title:SetPoint("TOPLEFT", 4, 0)
-title:SetText("Hunt")
+-- the line along the bottom: dim gold, bright while editing or a mob is found
+local accent = Flat(holder, "BORDER", 1, 1, 0.82, 0, 0.35)
+accent:SetPoint("BOTTOMLEFT", 1, 1)
+accent:SetPoint("BOTTOMRIGHT", -1, 1)
+accent:SetHeight(1)
 
-box = CreateFrame("EditBox", nil, holder, "InputBoxTemplate")
+local skull = holder:CreateTexture(nil, "ARTWORK")
+skull:SetSize(13, 13)
+skull:SetPoint("LEFT", 4, 0)
+skull:SetTexture("Interface\\TargetingFrame\\UI-RaidTargetingIcon_8")
+
+local label = holder:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+label:SetPoint("LEFT", skull, "RIGHT", 5, 0)
+label:SetJustifyH("LEFT")
+label:SetWordWrap(false)
+
+box = CreateFrame("EditBox", nil, holder)
+box:SetFontObject(GameFontHighlightSmall)
 box:SetAutoFocus(false)
-box:SetHeight(20)
-box:SetPoint("TOPLEFT", holder, "TOPLEFT", 6, -14) -- the template's edges sit outside its box
-box:SetPoint("TOPRIGHT", holder, "TOPRIGHT", -2, -14)
+box:SetHeight(PLATE_H - 4)
+box:SetPoint("LEFT", skull, "RIGHT", 5, 0)
 box:SetMaxLetters(90)
+box:SetTextInsets(0, 0, 0, 0)
+box:Hide()
 
--- One row per hunted mob under the box: its order, its name and an X that
--- removes it.
+local editing = false
+local found -- the found mob's frame, made below
+local ScanFound -- looks for a hunted mob and shows it there, made below
+
+local function PaintAccent()
+    local lit = editing or (found and found:IsShown())
+    accent:SetColorTexture(1, 0.82, 0, lit and 0.9 or 0.35)
+end
+
+local function RefreshLabel()
+    local list = ParseMobs(DB and DB.mob)
+    if #list == 0 then
+        label:SetText("|cff8a8a8aClick to hunt something|r")
+    else
+        label:SetText(table.concat(list, "|cff8a8a8a  ·  |r"))
+    end
+end
+
+local function StartEdit()
+    if not DB or editing then return end
+    editing = true
+    label:Hide()
+    box:SetText(DB.mob or "")
+    box:Show()
+    box:SetFocus()
+    box:HighlightText()
+    PaintAccent()
+end
+
+local function StopEdit()
+    editing = false
+    box:Hide()
+    label:Show()
+    RefreshLabel()
+    PaintAccent()
+end
+
+holder:SetScript("OnMouseUp", function(_, button)
+    if button == "LeftButton" and not LEM:IsInEditMode() then StartEdit() end
+end)
+holder:SetScript("OnEnter", function(self)
+    self.fill:SetColorTexture(0.11, 0.11, 0.13, 0.95)
+    if editing then return end
+    GameTooltip:SetOwner(self, "ANCHOR_TOP")
+    GameTooltip:AddLine("Hunt")
+    GameTooltip:AddLine("Click to type mob names (commas between, up to 3).", 1, 1, 1, true)
+    GameTooltip:AddLine("Your Hunt key targets the nearest one, marks it and uses " .. AbilityText() .. ".", 1, 1, 1, true)
+    GameTooltip:AddLine("Alt+click a mob: hunt it.  Shift+Alt+click: add it.", 0.6, 0.8, 1, true)
+    GameTooltip:Show()
+end)
+holder:SetScript("OnLeave", function(self)
+    self.fill:SetColorTexture(0.07, 0.07, 0.09, 0.92)
+    GameTooltip:Hide()
+end)
+
+-- The list, dropping down under the plate while you hover it or type: one
+-- row per hunted mob (its order, its name and an X that removes it), or a
+-- hint when there are none.
 local ROW_HEIGHT = 17
+local drop = CreateFrame("Frame", nil, holder)
+drop:SetPoint("TOPLEFT", holder, "BOTTOMLEFT", 0, -2)
+drop:SetPoint("TOPRIGHT", holder, "BOTTOMRIGHT", 0, -2)
+drop:SetFrameLevel(holder:GetFrameLevel() + 6)
+drop:EnableMouse(true)
+Plate(drop, ROW_HEIGHT * 2)
+drop:Hide()
+local dropHint = drop:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+dropHint:SetPoint("TOPLEFT", 6, -5)
+dropHint:SetPoint("RIGHT", drop, "RIGHT", -6, 0)
+dropHint:SetJustifyH("LEFT")
+dropHint:SetText("No mobs yet. Click above and type, or Alt+click one.")
+
 local rows = {}
 for i = 1, MAX_MOBS do
-    local row = CreateFrame("Frame", nil, holder)
+    local row = CreateFrame("Frame", nil, drop)
     row:SetHeight(ROW_HEIGHT)
-    row:SetPoint("TOPLEFT", holder, "TOPLEFT", 0, -36 - (i - 1) * ROW_HEIGHT)
-    row:SetPoint("RIGHT", holder, "RIGHT", 0, 0)
+    row:SetPoint("TOPLEFT", drop, "TOPLEFT", 2, -3 - (i - 1) * ROW_HEIGHT)
+    row:SetPoint("RIGHT", drop, "RIGHT", 0, 0)
     row.remove = CreateFrame("Button", nil, row, "UIPanelCloseButton")
     row.remove:SetSize(20, 20)
     row.remove:SetPoint("LEFT", row, "LEFT", -2, 0)
@@ -332,32 +463,35 @@ RefreshRows = function()
             row:Hide()
         end
     end
-    -- the rows hang below the frame instead of resizing it, so the box
-    -- never moves when the list changes
+    -- the list drops down over what's below instead of resizing the plate,
+    -- so the plate never moves when the list changes
+    drop:SetHeight(math.max(1, #list) * ROW_HEIGHT + 6)
+    dropHint:SetShown(#list == 0)
+    RefreshLabel()
 end
 
-local hint = box:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-hint:SetPoint("LEFT", 2, 0)
-hint:SetText("mob names, commas between, Enter")
-
-local function UpdateHint()
-    hint:SetShown(box:GetText() == "" and not box:HasFocus())
-end
+local UpdateHint = RefreshLabel -- (what the plate shows when it isn't being typed in)
 
 box:SetScript("OnEnterPressed", function(self)
     SetMobs(ParseMobs(self:GetText()), true)
     self:ClearFocus()
 end)
 box:SetScript("OnEscapePressed", function(self)
-    self:SetText(DB and DB.mob or "") -- undo unsaved typing
-    self:ClearFocus()
+    self:ClearFocus() -- unsaved typing is dropped
 end)
-box:SetScript("OnEditFocusGained", UpdateHint)
-box:SetScript("OnEditFocusLost", function(self)
-    self:SetText(DB and DB.mob or "")
-    UpdateHint()
+box:SetScript("OnEditFocusLost", StopEdit)
+
+-- the list shows while you type, or while the mouse is over the plate or
+-- the list itself (never in Edit Mode)
+local dropWait = 0
+holder:SetScript("OnUpdate", function(_, elapsed)
+    dropWait = dropWait + elapsed
+    if dropWait < 0.1 then return end
+    dropWait = 0
+    local want = not LEM:IsInEditMode()
+        and (box:HasFocus() or holder:IsMouseOver() or (drop:IsShown() and drop:IsMouseOver()))
+    if want ~= drop:IsShown() then drop:SetShown(want) end
 end)
-box:SetScript("OnTextChanged", UpdateHint)
 
 ---------------------------------------------------------------------------
 -- Edit Mode
@@ -376,8 +510,18 @@ end
 
 local default = { point = "CENTER", x = 0, y = 260 }
 
+-- The found mob's click button is anchored to the plate, which makes the
+-- plate a protected frame's anchor: it can't move or resize in a fight, so
+-- a change then waits for the fight to end.
+local applyPending = false
 local function Apply()
     if not DB then return end
+    if InCombatLockdown() then
+        applyPending = true
+        events:RegisterEvent("PLAYER_REGEN_ENABLED")
+        return
+    end
+    applyPending = false
     local l = Look()
     holder:SetWidth(l.width)
     holder:ClearAllPoints()
@@ -417,6 +561,25 @@ LEM:AddFrameSettings(holder, {
                 print(PREFIX .. "type /hunt ability <spell name> to set your spell.")
             end
         end,
+    },
+    {
+        -- the little unit frame above the plate when a hunted mob is about
+        kind = LEM.SettingType.Checkbox,
+        name = "Show the found mob",
+        default = true,
+        get = function() return not (DB and DB.showFound == false) end,
+        set = function(_, value)
+            DB.showFound = value
+            if ScanFound then ScanFound() end
+        end,
+    },
+    {
+        kind = LEM.SettingType.Checkbox,
+        name = "Sound when found",
+        -- off unless switched on here (Devon didn't want the ping)
+        default = false,
+        get = function() return DB and DB.foundSound == true or false end,
+        set = function(_, value) DB.foundSound = value end,
     },
 })
 
@@ -472,7 +635,7 @@ end
 ---------------------------------------------------------------------------
 -- Follow: your existing macro named "Follow" (any capitals, spaces at the
 -- ends ignored). Only its /follow line is swapped; its name, icon and any
--- other lines stay as they are. If there isn't one, an account macro
+-- other lines stay as they are. If there isn't one, a character macro
 -- "Follow" is made.
 ---------------------------------------------------------------------------
 local FOLLOW_MACRO = "Follow"
@@ -563,7 +726,7 @@ local function WriteFollow(verbose)
         end
         ok, err = pcall(EditMacro, index, name, icon, body)
     else
-        ok, err = pcall(CreateMacro, FOLLOW_MACRO, 134400, table.concat(FollowLines(DB.follow), "\n"), false)
+        ok, err = pcall(CreateMacro, FOLLOW_MACRO, 134400, table.concat(FollowLines(DB.follow), "\n"), true)
     end
     if not ok then
         print(PREFIX .. "couldn't save the Follow macro: " .. tostring(err))
@@ -639,17 +802,20 @@ if WorldFrame and WorldFrame.HookScript then
     WorldFrame:HookScript("OnMouseUp", function(_, button) FollowOnRelease(button) end)
 end
 
--- Tab Mark's spot, top right of the box: the mark your next Tab Mark press
--- puts down. Click it to start over at the skull (out of combat).
+-- Tab Mark's spot, at the right end of the plate: the mark your next Tab
+-- Mark press puts down. Click it to start over at the skull (out of combat).
 local tabSpot = CreateFrame("Button", nil, holder)
 tabSpot:SetSize(14, 14)
-tabSpot:SetPoint("TOPRIGHT", holder, "TOPRIGHT", -2, 1)
+tabSpot:SetPoint("RIGHT", holder, "RIGHT", -4, 0)
 tabSpot.icon = tabSpot:CreateTexture(nil, "ARTWORK")
 tabSpot.icon:SetAllPoints()
 tabSpot:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square", "ADD")
 local tabLabel = tabSpot:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
 tabLabel:SetPoint("RIGHT", tabSpot, "LEFT", -2, 0)
 tabLabel:SetText("Tab")
+-- the names (or the typing) stop short of it
+label:SetPoint("RIGHT", tabLabel, "LEFT", -6, 0)
+box:SetPoint("RIGHT", tabLabel, "LEFT", -6, 0)
 
 UpdateTabMark = function()
     local n = (tonumber(nextButton:GetAttribute("markIndex")) or 0) + 1
@@ -676,11 +842,340 @@ tabSpot:SetScript("OnEnter", function(self)
 end)
 tabSpot:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
+-- who your Follow macro follows: small, under the plate's right end (the
+-- list covers it while it's open)
 followText = holder:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-followText:SetPoint("TOPRIGHT", tabLabel, "TOPLEFT", -8, 0)
-followText:SetPoint("LEFT", title, "RIGHT", 8, 0)
+followText:SetPoint("TOPRIGHT", holder, "BOTTOMRIGHT", -2, -2)
 followText:SetJustifyH("RIGHT")
 followText:SetWordWrap(false)
+
+---------------------------------------------------------------------------
+-- The found mob: when one of your hunted mobs is your target, or has a
+-- nameplate near you, a little unit frame shows it above the plate:
+-- portrait, its raid mark, level, name, health, and whether it's your
+-- TARGET, just NEARBY, or DEAD. Click it to target that mob; Shift+click
+-- does what your Hunt key does (target, mark, ability).
+---------------------------------------------------------------------------
+local FOUND_H, FOUND_GAP = 30, 4
+
+found = CreateFrame("Frame", nil, holder)
+found:SetPoint("BOTTOMLEFT", holder, "TOPLEFT", 0, FOUND_GAP)
+found:SetPoint("BOTTOMRIGHT", holder, "TOPRIGHT", 0, FOUND_GAP)
+found:SetHeight(FOUND_H)
+found:SetFrameLevel(holder:GetFrameLevel() + 2)
+Plate(found, FOUND_H)
+found:Hide()
+
+local pbox = CreateFrame("Frame", nil, found)
+pbox:SetSize(FOUND_H - 4, FOUND_H - 4)
+pbox:SetPoint("LEFT", 2, 0)
+Flat(pbox, "BACKGROUND", 0, 0, 0, 0, 1):SetAllPoints()
+found.portrait = pbox:CreateTexture(nil, "ARTWORK")
+found.portrait:SetPoint("TOPLEFT", 1, -1)
+found.portrait:SetPoint("BOTTOMRIGHT", -1, 1)
+found.portrait:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+found.mark = pbox:CreateTexture(nil, "OVERLAY")
+found.mark:SetSize(13, 13)
+found.mark:SetPoint("CENTER", pbox, "TOPRIGHT", -1, -1)
+found.mark:SetTexture("Interface\\TargetingFrame\\UI-RaidTargetingIcons")
+found.mark:Hide()
+
+found.state = found:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+found.state:SetPoint("TOPRIGHT", found, "TOPRIGHT", -5, -3)
+found.level = found:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+found.level:SetPoint("TOPLEFT", pbox, "TOPRIGHT", 6, -1)
+found.name = found:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+found.name:SetPoint("LEFT", found.level, "RIGHT", 4, 0)
+found.name:SetPoint("RIGHT", found.state, "LEFT", -6, 0)
+found.name:SetJustifyH("LEFT")
+found.name:SetWordWrap(false)
+
+found.health = CreateFrame("StatusBar", nil, found)
+found.health:SetPoint("BOTTOMLEFT", pbox, "BOTTOMRIGHT", 6, 1)
+found.health:SetPoint("RIGHT", found, "RIGHT", -4, 0)
+found.health:SetHeight(10)
+found.health:SetStatusBarTexture("Interface\\TargetingFrame\\UI-StatusBar")
+found.health:SetMinMaxValues(0, 1)
+found.health:SetValue(1)
+Flat(found.health, "BACKGROUND", 0, 0, 0, 0, 0.6):SetAllPoints()
+found.pct = found.health:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+found.pct:SetPoint("CENTER", 0, 0)
+do -- small enough to sit inside the 10px bar
+    local path = GameFontHighlightSmall:GetFont()
+    if path then found.pct:SetFont(path, 8, "OUTLINE") end
+end
+
+-- a gold flash across the frame when a mob is found, and a quick fade in
+local glow = found:CreateTexture(nil, "OVERLAY")
+glow:SetAllPoints()
+Sheen(glow, 0.05, 0.35)
+glow:SetVertexColor(1, 0.82, 0)
+glow:Hide()
+local glowAnim = glow:CreateAnimationGroup()
+glowAnim:SetScript("OnFinished", function() glow:Hide() end)
+local glowIn = glowAnim:CreateAnimation("Alpha")
+glowIn:SetFromAlpha(0)
+glowIn:SetToAlpha(1)
+glowIn:SetDuration(0.12)
+glowIn:SetOrder(1)
+local glowOut = glowAnim:CreateAnimation("Alpha")
+glowOut:SetFromAlpha(1)
+glowOut:SetToAlpha(0)
+glowOut:SetDuration(0.7)
+glowOut:SetOrder(2)
+local fadeIn = found:CreateAnimationGroup()
+local fade = fadeIn:CreateAnimation("Alpha")
+fade:SetFromAlpha(0)
+fade:SetToAlpha(1)
+fade:SetDuration(0.15)
+
+-- The click button over it. It's protected (a click that targets has to
+-- be), so it can only show, hide or change what it targets out of combat;
+-- a change made in a fight waits for the fight to end. It's anchored to
+-- the plate, not to the frame above, so that frame can come and go freely.
+local foundBtn = CreateFrame("Button", "HuntTargetFoundButton", UIParent, "SecureActionButtonTemplate")
+foundBtn:SetPoint("BOTTOMLEFT", holder, "TOPLEFT", 0, FOUND_GAP)
+foundBtn:SetPoint("BOTTOMRIGHT", holder, "TOPRIGHT", 0, FOUND_GAP)
+foundBtn:SetHeight(FOUND_H)
+foundBtn:SetFrameStrata(holder:GetFrameStrata())
+foundBtn:SetFrameLevel(holder:GetFrameLevel() + 10)
+foundBtn:RegisterForClicks("AnyUp")
+foundBtn:SetAttribute("useOnKeyDown", false)
+foundBtn:SetAttribute("type1", "macro")
+foundBtn:SetAttribute("shift-type1", "click")
+foundBtn:SetAttribute("shift-clickbutton1", huntButton)
+local hl = foundBtn:CreateTexture(nil, "HIGHLIGHT")
+hl:SetAllPoints()
+hl:SetColorTexture(1, 1, 1, 0.06)
+foundBtn:Hide()
+
+local shown = { unit = nil, name = nil } -- what the frame is showing now
+local btnPending = false
+
+local function SyncButton()
+    if InCombatLockdown() then
+        btnPending = true
+        events:RegisterEvent("PLAYER_REGEN_ENABLED")
+        return
+    end
+    btnPending = false
+    if shown.name then
+        local text = "/targetexact " .. shown.name
+        if foundBtn:GetAttribute("macrotext") ~= text then foundBtn:SetAttribute("macrotext", text) end
+    end
+    foundBtn:SetShown(found:IsShown())
+end
+
+foundBtn:SetScript("OnEnter", function(self)
+    GameTooltip:SetOwner(self, "ANCHOR_TOP")
+    local exists = shown.unit and UnitExists(shown.unit)
+    if exists and not isSecret(exists) then
+        GameTooltip:SetUnit(shown.unit)
+    elseif shown.name then
+        GameTooltip:AddLine(shown.name)
+    end
+    GameTooltip:AddLine("Click: target it", 0.6, 0.8, 1)
+    GameTooltip:AddLine("Shift+click: Hunt (mark + ability)", 0.6, 0.8, 1)
+    GameTooltip:Show()
+end)
+foundBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+
+-- a plain value, or nil when the game hides it
+local function Plain(v)
+    if isSecret(v) then return nil end
+    return v
+end
+
+-- which hunted name a unit is (its place in the list), its name, and
+-- whether it's dead; nil when it isn't a living or dead hunted mob
+local function HuntedIndex(unit, list)
+    if not Plain(UnitExists(unit)) then return end
+    local name = Plain(UnitName(unit))
+    if type(name) ~= "string" or name == "" then return end
+    local lower, index = name:lower(), nil
+    for i, mob in ipairs(list) do
+        if lower:find(mob:lower(), 1, true) then index = i break end
+    end
+    if not index then return end
+    if not Plain(UnitCanAttack("player", unit)) then return end
+    return index, name, Plain(UnitIsDead(unit)) and true or false
+end
+
+local function LevelText(unit)
+    local level = Plain(UnitLevel(unit))
+    if type(level) ~= "number" then return "", 1, 1, 1 end
+    if level < 0 then return "??", 1, 0.1, 0.1 end
+    local c = (GetCreatureDifficultyColor and GetCreatureDifficultyColor(level))
+        or (GetQuestDifficultyColor and GetQuestDifficultyColor(level))
+    if c then return tostring(level), c.r, c.g, c.b end
+    return tostring(level), 1, 0.82, 0
+end
+
+local function PaintHealth(unit)
+    local okMax, max = pcall(UnitHealthMax, unit)
+    local okCur, cur = pcall(UnitHealth, unit)
+    if okMax and okCur then
+        pcall(found.health.SetMinMaxValues, found.health, 0, max)
+        pcall(found.health.SetValue, found.health, cur)
+    end
+    local m, c = Plain(max), Plain(cur)
+    if type(m) == "number" and type(c) == "number" and m > 0 then
+        found.pct:SetText(math.floor(c / m * 100 + 0.5) .. "%")
+    else
+        found.pct:SetText("")
+    end
+end
+
+local function PaintMark(unit)
+    local index = Plain(GetRaidTargetIndex(unit))
+    if type(index) == "number" and index > 0 and SetRaidTargetIconTexture then
+        SetRaidTargetIconTexture(found.mark, index)
+        found.mark:Show()
+    else
+        found.mark:Hide()
+    end
+end
+
+local function ShowFound(unit, name, dead, isTarget)
+    local isNew = not found:IsShown() or shown.name ~= name
+    local newUnit = isNew or shown.unit ~= unit
+    shown.unit, shown.name = unit, name
+
+    local lt, r, g, b = LevelText(unit)
+    local class = Plain(UnitClassification(unit))
+    if class == "elite" or class == "worldboss" then lt = lt .. "+"
+    elseif class == "rareelite" then lt = lt .. "+ |cffc0c0ffRare|r"
+    elseif class == "rare" then lt = lt .. " |cffc0c0ffRare|r" end
+    found.level:SetText(lt)
+    found.level:SetTextColor(r, g, b)
+    found.name:SetText(name)
+
+    if dead then
+        found.state:SetText("DEAD")
+        found.state:SetTextColor(0.55, 0.55, 0.55)
+        found.health:SetStatusBarColor(0.35, 0.35, 0.35)
+        found.portrait:SetDesaturated(true)
+    else
+        found.state:SetText(isTarget and "TARGET" or "NEARBY")
+        if isTarget then found.state:SetTextColor(1, 0.82, 0) else found.state:SetTextColor(0.7, 0.7, 0.75) end
+        local reaction = Plain(UnitReaction(unit, "player"))
+        if type(reaction) == "number" and reaction == 4 then
+            found.health:SetStatusBarColor(0.95, 0.8, 0.15) -- neutral
+        else
+            found.health:SetStatusBarColor(0.85, 0.18, 0.15)
+        end
+        found.portrait:SetDesaturated(false)
+    end
+    if newUnit then SetPortraitTexture(found.portrait, unit) end
+    PaintHealth(unit)
+    PaintMark(unit)
+
+    if isNew then
+        found:Show()
+        fadeIn:Play()
+        glowAnim:Stop()
+        glow:Show()
+        glowAnim:Play()
+        -- a ping when one turns up near you (not when you targeted it yourself)
+        if not isTarget and not dead and DB.foundSound == true and SOUNDKIT and SOUNDKIT.MAP_PING then
+            PlaySound(SOUNDKIT.MAP_PING)
+        end
+        PaintAccent()
+    end
+    SyncButton()
+end
+
+local function HideFound()
+    if not found:IsShown() then return end
+    found:Hide()
+    shown.unit, shown.name = nil, nil
+    PaintAccent()
+    SyncButton()
+end
+
+-- your target first (a dead one shows as DEAD), then the nameplates near
+-- you (living ones); the earlier name in your list wins
+ScanFound = function()
+    if found.inEditMode then return end -- (the stand-in stays put)
+    if not DB or DB.showFound == false then HideFound() return end
+    local list = ParseMobs(DB.mob)
+    if #list == 0 then HideFound() return end
+    local index, name, dead = HuntedIndex("target", list)
+    if index then
+        ShowFound("target", name, dead, true)
+        return
+    end
+    local bestIndex, bestUnit, bestName
+    for i = 1, 40 do
+        local unit = "nameplate" .. i
+        local idx, n, d = HuntedIndex(unit, list)
+        if idx and not d and (not bestIndex or idx < bestIndex) then
+            bestIndex, bestUnit, bestName = idx, unit, n
+            if idx == 1 then break end
+        end
+    end
+    if bestUnit then
+        ShowFound(bestUnit, bestName, false, false)
+    else
+        HideFound()
+    end
+end
+
+-- a look every quarter second, and at once on the events that matter
+local scanWait = 0
+holder:HookScript("OnUpdate", function(_, elapsed)
+    scanWait = scanWait + elapsed
+    if scanWait < 0.25 then return end
+    scanWait = 0
+    ScanFound()
+end)
+
+local scanEvents = CreateFrame("Frame")
+for _, e in ipairs({ "PLAYER_TARGET_CHANGED", "NAME_PLATE_UNIT_ADDED", "NAME_PLATE_UNIT_REMOVED",
+    "UNIT_HEALTH", "RAID_TARGET_UPDATE", "UNIT_PORTRAIT_UPDATE" }) do
+    pcall(scanEvents.RegisterEvent, scanEvents, e)
+end
+scanEvents:SetScript("OnEvent", function(_, event, unit)
+    if event == "UNIT_HEALTH" then
+        if shown.unit and unit == shown.unit and found:IsShown() then PaintHealth(unit) end
+        return
+    end
+    if event == "UNIT_PORTRAIT_UPDATE" then
+        if shown.unit and unit == shown.unit and found:IsShown() then SetPortraitTexture(found.portrait, unit) end
+        return
+    end
+    -- a nameplate token can be handed to another mob: look again from scratch
+    if event == "NAME_PLATE_UNIT_REMOVED" and unit == shown.unit then shown.unit = nil end
+    ScanFound()
+end)
+
+-- in Edit Mode, a stand-in shows where the frame sits
+LEM:RegisterCallback("enter", function()
+    if found:IsShown() then return end
+    shown.unit, shown.name = nil, nil
+    found.level:SetText("12")
+    found.level:SetTextColor(1, 0.82, 0)
+    found.name:SetText("Found mob shows here")
+    found.state:SetText("NEARBY")
+    found.state:SetTextColor(0.7, 0.7, 0.75)
+    found.portrait:SetTexture("Interface\\Icons\\INV_Misc_QuestionMark")
+    found.portrait:SetDesaturated(false)
+    found.mark:Hide()
+    found.health:SetMinMaxValues(0, 1)
+    found.health:SetValue(0.7)
+    found.health:SetStatusBarColor(0.85, 0.18, 0.15)
+    found.pct:SetText("70%")
+    found.inEditMode = true
+    found:Show()
+end)
+LEM:RegisterCallback("exit", function()
+    if found.inEditMode then
+        found.inEditMode = nil
+        found:Hide()
+        shown.unit, shown.name = nil, nil
+        ScanFound()
+    end
+end)
 
 -- add = true puts it on the end of the list; otherwise it replaces the list
 local function Hunt(name, add)
@@ -854,5 +1349,7 @@ events:SetScript("OnEvent", function(_, event, arg1, arg2)
             WriteMacro(false) -- catch up with the target you ended the fight on
         end
         if followPending then WriteFollow(true) end
+        if applyPending then Apply() end   -- a move or resize asked for mid-fight
+        if btnPending then SyncButton() end -- the found mob's click button
     end
 end)
