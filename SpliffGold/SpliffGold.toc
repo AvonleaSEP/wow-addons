@@ -1,0 +1,16 @@
+## Interface: 16001
+## Title: Spliff Gold
+## Notes: The Money Book: where your gold comes from and goes, per character, day, category and zone. A Spliffbars module, forked from Accountant Classic (GPLv2). Click the Gold bar or /mb.
+## Author: Devon (from Accountant Classic by arith and kamusis)
+## Version: 0.1 (from Accountant Classic v2.30.03)
+## X-License: GPLv2
+## Dependencies: Spliffbars
+## OptionalDeps: Accountant_Classic
+## LoadOnDemand: 1
+## X-Spliff-Module: Money Book
+## X-Spliff-Default: on
+## SavedVariables: SpliffGoldDB, SpliffGoldHistory
+
+History.lua
+Tracker.lua
+Book.lua
