@@ -16,6 +16,8 @@ local DEFAULTS = { size = 36, count = true, countSize = 14 }
 local DB, layoutName
 
 local function Look()
+    -- Edit Mode can ask before the saved settings have loaded: the defaults for now
+    if not DB then return CopyTable(DEFAULTS) end
     DB.layouts = DB.layouts or {}
     local key = layoutName or "Default"
     local l = DB.layouts[key]
